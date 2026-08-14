@@ -85,10 +85,16 @@ struct AppState {
 
     taskbar_index: usize,
     tray_offset: i32,
+    widget_placement: WidgetPlacement,
+    floating_x: Option<i32>,
+    floating_y: Option<i32>,
     dragging: bool,
     drag_start_mouse_x: i32,
+    drag_start_mouse_y: i32,
     drag_start_client_x: i32,
     drag_start_offset: i32,
+    drag_start_window_x: i32,
+    drag_start_window_y: i32,
 
     widget_visible: bool,
 }
@@ -99,6 +105,14 @@ enum UpdateStatus {
     Checking,
     UpToDate,
     Available(ReleaseDescriptor),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum WidgetPlacement {
+    #[default]
+    Taskbar,
+    Floating,
 }
 
 const RETRY_BASE_MS: u32 = 30_000; // 30 seconds
@@ -131,6 +145,9 @@ const IDM_LANG_SIMPLIFIED_CHINESE: u16 = 51;
 const IDM_MODEL_CLAUDE_CODE: u16 = 60;
 const IDM_MODEL_CODEX: u16 = 61;
 const IDM_MODEL_ANTIGRAVITY: u16 = 62;
+const IDM_PLACEMENT_TASKBAR: u16 = 70;
+const IDM_PLACEMENT_FLOATING: u16 = 71;
+const IDM_PLACEMENT_TRAY_ONLY: u16 = 72;
 
 const WM_DPICHANGED_MSG: u32 = 0x02E0;
 const WM_APP_UPDATE_CHECK_COMPLETE: u32 = WM_APP + 2;
@@ -302,6 +319,12 @@ struct SettingsFile {
     tray_offset: i32,
     #[serde(default)]
     taskbar_index: usize,
+    #[serde(default)]
+    widget_placement: WidgetPlacement,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    floating_x: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    floating_y: Option<i32>,
     #[serde(default = "default_poll_interval")]
     poll_interval_ms: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -323,6 +346,9 @@ impl Default for SettingsFile {
         Self {
             tray_offset: 0,
             taskbar_index: 0,
+            widget_placement: WidgetPlacement::Taskbar,
+            floating_x: None,
+            floating_y: None,
             poll_interval_ms: default_poll_interval(),
             language: None,
             last_update_check_unix: None,
@@ -382,6 +408,9 @@ fn save_state_settings() {
         save_settings(&SettingsFile {
             tray_offset: s.tray_offset,
             taskbar_index: s.taskbar_index,
+            widget_placement: s.widget_placement,
+            floating_x: s.floating_x,
+            floating_y: s.floating_y,
             poll_interval_ms: s.poll_interval_ms,
             language: s
                 .language_override
@@ -485,12 +514,81 @@ fn toggle_widget_visibility(hwnd: HWND) {
     save_state_settings();
     unsafe {
         if new_visible {
-            position_at_taskbar();
+            position_widget();
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             render_layered();
         } else {
             let _ = ShowWindow(hwnd, SW_HIDE);
         }
+    }
+}
+
+fn set_widget_placement(hwnd: HWND, placement: WidgetPlacement) {
+    diagnose::log(format!("changing widget placement to {placement:?}"));
+    match placement {
+        WidgetPlacement::Taskbar => {
+            let taskbar_index = {
+                let mut state = lock_state();
+                let Some(s) = state.as_mut() else {
+                    return;
+                };
+                s.widget_placement = WidgetPlacement::Taskbar;
+                s.widget_visible = true;
+                s.taskbar_index
+            };
+
+            if !attach_to_taskbar(hwnd, taskbar_index) {
+                diagnose::log("unable to switch to taskbar placement; keeping floating window");
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    s.widget_placement = WidgetPlacement::Floating;
+                    s.embedded = false;
+                }
+            }
+        }
+        WidgetPlacement::Floating => {
+            let old_hook = {
+                let mut state = lock_state();
+                let Some(s) = state.as_mut() else {
+                    return;
+                };
+                s.widget_placement = WidgetPlacement::Floating;
+                s.widget_visible = true;
+                s.embedded = false;
+                s.taskbar_hwnd = None;
+                s.tray_notify_hwnd = None;
+                s.win_event_hook.take()
+            };
+            if let Some(hook) = old_hook {
+                native_interop::unhook_win_event(hook);
+            }
+            native_interop::detach_from_taskbar(hwnd);
+            unsafe {
+                let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
+            }
+        }
+    }
+
+    save_state_settings();
+    position_widget();
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
+    render_layered();
+}
+
+fn set_tray_only(hwnd: HWND) {
+    diagnose::log("changing widget placement to tray only");
+    {
+        let mut state = lock_state();
+        let Some(s) = state.as_mut() else {
+            return;
+        };
+        s.widget_visible = false;
+    }
+    save_state_settings();
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_HIDE);
     }
 }
 
@@ -1008,8 +1106,8 @@ const SEGMENT_GAP: i32 = 1;
 const SEGMENT_COUNT: i32 = 10;
 const CORNER_RADIUS: i32 = 2;
 
-const LEFT_DIVIDER_W: i32 = 3;
-const DIVIDER_RIGHT_MARGIN: i32 = 10;
+const LEFT_DIVIDER_W: i32 = 12;
+const DIVIDER_RIGHT_MARGIN: i32 = 6;
 const LABEL_WIDTH: i32 = 18;
 const LABEL_RIGHT_MARGIN: i32 = 10;
 const BAR_RIGHT_MARGIN: i32 = 4;
@@ -1280,16 +1378,24 @@ pub fn run() {
                 last_update_check_unix: settings.last_update_check_unix,
                 taskbar_index: settings.taskbar_index,
                 tray_offset: settings.tray_offset,
+                widget_placement: settings.widget_placement,
+                floating_x: settings.floating_x,
+                floating_y: settings.floating_y,
                 dragging: false,
                 drag_start_mouse_x: 0,
+                drag_start_mouse_y: 0,
                 drag_start_client_x: 0,
                 drag_start_offset: 0,
+                drag_start_window_x: 0,
+                drag_start_window_y: 0,
                 widget_visible: settings.widget_visible,
             });
         }
 
-        // Try to embed in taskbar
-        if attach_to_taskbar(hwnd, settings.taskbar_index) {
+        // Embed only when taskbar placement is selected.
+        if settings.widget_placement == WidgetPlacement::Taskbar
+            && attach_to_taskbar(hwnd, settings.taskbar_index)
+        {
             embedded = true;
         }
 
@@ -1311,7 +1417,7 @@ pub fn run() {
         sync_tray_icons(hwnd);
 
         // Position and show (only if widget_visible preference is true)
-        position_at_taskbar();
+        position_widget();
         if settings.widget_visible {
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         }
@@ -1616,13 +1722,15 @@ fn paint_content(
         let left_brush = CreateSolidBrush(COLORREF(native_interop::colorref(
             div_left.0, div_left.1, div_left.2,
         )));
-        let left_rect = RECT {
-            left: 0,
-            top: divider_top,
-            right: sc(2),
-            bottom: divider_bottom,
-        };
-        FillRect(hdc, &left_rect, left_brush);
+        for x in [3, 9] {
+            let rect = RECT {
+                left: sc(x),
+                top: divider_top,
+                right: sc(x + 1),
+                bottom: divider_bottom,
+            };
+            FillRect(hdc, &rect, left_brush);
+        }
         let _ = DeleteObject(left_brush);
 
         let right_brush = CreateSolidBrush(COLORREF(native_interop::colorref(
@@ -1631,9 +1739,9 @@ fn paint_content(
             div_right.2,
         )));
         let right_rect = RECT {
-            left: sc(2),
+            left: sc(6),
             top: divider_top,
-            right: sc(3),
+            right: sc(7),
             bottom: divider_bottom,
         };
         FillRect(hdc, &right_rect, right_brush);
@@ -2018,6 +2126,99 @@ fn tray_reposition_is_suppressed() -> bool {
     }
 }
 
+fn position_widget() {
+    let (placement, embedded) = {
+        let state = lock_state();
+        match state.as_ref() {
+            Some(s) => (s.widget_placement, s.embedded),
+            None => return,
+        }
+    };
+
+    if placement == WidgetPlacement::Taskbar && embedded {
+        position_at_taskbar();
+    } else {
+        position_floating();
+    }
+}
+
+fn position_floating() {
+    refresh_dpi();
+    let (hwnd, saved_x, saved_y, dragging) = {
+        let state = lock_state();
+        let Some(s) = state.as_ref() else {
+            return;
+        };
+        (s.hwnd.to_hwnd(), s.floating_x, s.floating_y, s.dragging)
+    };
+    if dragging {
+        return;
+    }
+
+    let width = total_widget_width();
+    let height = sc(WIDGET_HEIGHT);
+    let margin = sc(16);
+    let work_area = unsafe {
+        let monitor = match (saved_x, saved_y) {
+            (Some(x), Some(y)) => MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST),
+            _ => MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+        };
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(monitor, &mut info).as_bool() {
+            info.rcWork
+        } else {
+            RECT {
+                left: 0,
+                top: 0,
+                right: GetSystemMetrics(SM_CXSCREEN),
+                bottom: GetSystemMetrics(SM_CYSCREEN),
+            }
+        }
+    };
+
+    let (x, y) = resolve_floating_position(work_area, width, height, saved_x, saved_y, margin);
+
+    let changed = {
+        let mut state = lock_state();
+        if let Some(s) = state.as_mut() {
+            let changed = s.floating_x != Some(x) || s.floating_y != Some(y);
+            s.floating_x = Some(x);
+            s.floating_y = Some(y);
+            changed
+        } else {
+            false
+        }
+    };
+    if changed {
+        diagnose::log(format!(
+            "positioned floating widget at x={x} y={y} w={width} h={height}"
+        ));
+        save_state_settings();
+    }
+    native_interop::move_window(hwnd, x, y, width, height);
+}
+
+fn resolve_floating_position(
+    work_area: RECT,
+    width: i32,
+    height: i32,
+    saved_x: Option<i32>,
+    saved_y: Option<i32>,
+    margin: i32,
+) -> (i32, i32) {
+    let default_x = work_area.right - width - margin;
+    let default_y = work_area.bottom - height - margin;
+    let max_x = (work_area.right - width).max(work_area.left);
+    let max_y = (work_area.bottom - height).max(work_area.top);
+    (
+        saved_x.unwrap_or(default_x).clamp(work_area.left, max_x),
+        saved_y.unwrap_or(default_y).clamp(work_area.top, max_y),
+    )
+}
+
 fn position_at_taskbar() {
     refresh_dpi();
     // Drop the app-state lock before any Win32 call that may synchronously
@@ -2149,7 +2350,7 @@ unsafe extern "system" fn on_tray_location_changed(
             }
         };
         if should_reposition {
-            position_at_taskbar();
+            position_widget();
             render_layered();
         }
     }
@@ -2193,7 +2394,7 @@ unsafe extern "system" fn wnd_proc(
                 check_language_change();
             }
             refresh_dpi();
-            position_at_taskbar();
+            position_widget();
             render_layered();
             LRESULT(0)
         }
@@ -2282,17 +2483,30 @@ unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         WM_SETCURSOR => {
-            let is_dragging = {
+            let (is_dragging, placement) = {
                 let state = lock_state();
-                state.as_ref().map(|s| s.dragging).unwrap_or(false)
+                state
+                    .as_ref()
+                    .map(|s| (s.dragging, s.widget_placement))
+                    .unwrap_or((false, WidgetPlacement::Taskbar))
             };
             if is_dragging {
-                let cursor = LoadCursorW(HINSTANCE::default(), IDC_SIZEWE).unwrap_or_default();
+                let cursor_id = if placement == WidgetPlacement::Floating {
+                    IDC_SIZEALL
+                } else {
+                    IDC_SIZEWE
+                };
+                let cursor = LoadCursorW(HINSTANCE::default(), cursor_id).unwrap_or_default();
                 SetCursor(cursor);
                 return LRESULT(1);
             }
             if cursor_is_on_drag_handle(hwnd) {
-                let cursor = LoadCursorW(HINSTANCE::default(), IDC_SIZEWE).unwrap_or_default();
+                let cursor_id = if placement == WidgetPlacement::Floating {
+                    IDC_SIZEALL
+                } else {
+                    IDC_SIZEWE
+                };
+                let cursor = LoadCursorW(HINSTANCE::default(), cursor_id).unwrap_or_default();
                 SetCursor(cursor);
                 return LRESULT(1);
             }
@@ -2307,12 +2521,16 @@ unsafe extern "system" fn wnd_proc(
 
             let mut pt = POINT::default();
             let _ = GetCursorPos(&mut pt);
+            let window_rect = native_interop::get_window_rect_safe(hwnd).unwrap_or_default();
             let mut state = lock_state();
             if let Some(s) = state.as_mut() {
                 s.dragging = true;
                 s.drag_start_mouse_x = pt.x;
+                s.drag_start_mouse_y = pt.y;
                 s.drag_start_client_x = client_x;
                 s.drag_start_offset = s.tray_offset;
+                s.drag_start_window_x = window_rect.left;
+                s.drag_start_window_y = window_rect.top;
             }
             SetCapture(hwnd);
             LRESULT(0)
@@ -2325,6 +2543,25 @@ unsafe extern "system" fn wnd_proc(
             if is_dragging {
                 let mut pt = POINT::default();
                 let _ = GetCursorPos(&mut pt);
+                let floating_target = {
+                    let mut state = lock_state();
+                    let Some(s) = state.as_mut() else {
+                        return LRESULT(0);
+                    };
+                    if s.widget_placement == WidgetPlacement::Floating {
+                        let x = s.drag_start_window_x + pt.x - s.drag_start_mouse_x;
+                        let y = s.drag_start_window_y + pt.y - s.drag_start_mouse_y;
+                        s.floating_x = Some(x);
+                        s.floating_y = Some(y);
+                        Some((s.hwnd.to_hwnd(), x, y, total_widget_width_for_state(s)))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((hwnd_val, x, y, widget_width)) = floating_target {
+                    native_interop::move_window(hwnd_val, x, y, widget_width, sc(WIDGET_HEIGHT));
+                    return LRESULT(0);
+                }
                 let move_target = {
                     let mut state = lock_state();
                     let s = match state.as_mut() {
@@ -2421,7 +2658,7 @@ unsafe extern "system" fn wnd_proc(
                 if let Some(s) = state.as_mut() {
                     if s.dragging {
                         s.dragging = false;
-                        Some((s.taskbar_index, s.drag_start_client_x))
+                        Some((s.widget_placement, s.taskbar_index, s.drag_start_client_x))
                     } else {
                         None
                     }
@@ -2429,27 +2666,31 @@ unsafe extern "system" fn wnd_proc(
                     None
                 }
             };
-            if let Some((current_taskbar_index, drag_start_client_x)) = drag_result {
+            if let Some((placement, current_taskbar_index, drag_start_client_x)) = drag_result {
                 let _ = ReleaseCapture();
-                if let Some((target_index, target_taskbar)) = taskbar_at_point(pt) {
-                    if target_index != current_taskbar_index {
-                        let new_offset = offset_for_drop_point(
-                            target_taskbar.hwnd,
-                            target_taskbar.rect,
-                            pt,
-                            drag_start_client_x,
-                        );
-                        {
-                            let mut state = lock_state();
-                            if let Some(s) = state.as_mut() {
-                                s.tray_offset = new_offset;
+                if placement == WidgetPlacement::Taskbar {
+                    if let Some((target_index, target_taskbar)) = taskbar_at_point(pt) {
+                        if target_index != current_taskbar_index {
+                            let new_offset = offset_for_drop_point(
+                                target_taskbar.hwnd,
+                                target_taskbar.rect,
+                                pt,
+                                drag_start_client_x,
+                            );
+                            {
+                                let mut state = lock_state();
+                                if let Some(s) = state.as_mut() {
+                                    s.tray_offset = new_offset;
+                                }
+                            }
+                            if attach_to_taskbar(hwnd, target_index) {
+                                position_widget();
+                                render_layered();
                             }
                         }
-                        if attach_to_taskbar(hwnd, target_index) {
-                            position_at_taskbar();
-                            render_layered();
-                        }
                     }
+                } else {
+                    position_widget();
                 }
                 save_state_settings();
             }
@@ -2521,15 +2762,29 @@ unsafe extern "system" fn wnd_proc(
                     }
                     PostQuitMessage(0);
                 }
+                IDM_PLACEMENT_TASKBAR => {
+                    set_widget_placement(hwnd, WidgetPlacement::Taskbar);
+                }
+                IDM_PLACEMENT_FLOATING => {
+                    set_widget_placement(hwnd, WidgetPlacement::Floating);
+                }
+                IDM_PLACEMENT_TRAY_ONLY => {
+                    set_tray_only(hwnd);
+                }
                 IDM_RESET_POSITION => {
                     {
                         let mut state = lock_state();
                         if let Some(s) = state.as_mut() {
-                            s.tray_offset = 0;
+                            if s.widget_placement == WidgetPlacement::Floating {
+                                s.floating_x = None;
+                                s.floating_y = None;
+                            } else {
+                                s.tray_offset = 0;
+                            }
                         }
                     }
                     save_state_settings();
-                    position_at_taskbar();
+                    position_widget();
                 }
                 IDM_START_WITH_WINDOWS => {
                     set_startup_enabled(!is_startup_enabled());
@@ -2583,7 +2838,7 @@ unsafe extern "system" fn wnd_proc(
                         }
                     }
                     save_state_settings();
-                    position_at_taskbar();
+                    position_widget();
                     render_layered();
                     sync_tray_icons(hwnd);
                     let sh = SendHwnd::from_hwnd(hwnd);
@@ -2672,6 +2927,7 @@ fn show_context_menu(hwnd: HWND) {
             install_channel,
             update_status,
             widget_visible,
+            widget_placement,
             show_claude_code,
             show_codex,
             show_antigravity,
@@ -2686,6 +2942,7 @@ fn show_context_menu(hwnd: HWND) {
                     s.install_channel,
                     s.update_status.clone(),
                     s.widget_visible,
+                    s.widget_placement,
                     s.show_claude_code,
                     s.show_codex,
                     s.show_antigravity,
@@ -2698,6 +2955,7 @@ fn show_context_menu(hwnd: HWND) {
                     InstallChannel::Portable,
                     UpdateStatus::Idle,
                     true,
+                    WidgetPlacement::Taskbar,
                     true,
                     false,
                     false,
@@ -2797,6 +3055,46 @@ fn show_context_menu(hwnd: HWND) {
 
         // Settings submenu
         let settings_menu = CreatePopupMenu().unwrap();
+
+        let placement_menu = CreatePopupMenu().unwrap();
+        let placement_items = [
+            (
+                IDM_PLACEMENT_TASKBAR,
+                strings.placement_taskbar,
+                widget_visible && widget_placement == WidgetPlacement::Taskbar,
+            ),
+            (
+                IDM_PLACEMENT_FLOATING,
+                strings.placement_floating,
+                widget_visible && widget_placement == WidgetPlacement::Floating,
+            ),
+            (
+                IDM_PLACEMENT_TRAY_ONLY,
+                strings.placement_tray_only,
+                !widget_visible,
+            ),
+        ];
+        for (id, label, checked) in placement_items {
+            let label_str = native_interop::wide_str(label);
+            let flags = if checked {
+                MF_CHECKED
+            } else {
+                MENU_ITEM_FLAGS(0)
+            };
+            let _ = AppendMenuW(
+                placement_menu,
+                flags,
+                id as usize,
+                PCWSTR::from_raw(label_str.as_ptr()),
+            );
+        }
+        let placement_label = native_interop::wide_str(strings.placement);
+        let _ = AppendMenuW(
+            settings_menu,
+            MF_POPUP,
+            placement_menu.0 as usize,
+            PCWSTR::from_raw(placement_label.as_ptr()),
+        );
 
         let startup_str = native_interop::wide_str(strings.start_with_windows);
         let startup_flags = if is_startup_enabled() {
@@ -3246,5 +3544,67 @@ fn draw_rounded_rect(hdc: HDC, rect: &RECT, color: &Color, radius: i32) {
         let _ = FillRgn(hdc, rgn, brush);
         let _ = DeleteObject(rgn);
         let _ = DeleteObject(brush);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn existing_settings_default_to_taskbar_placement() {
+        let settings: SettingsFile = serde_json::from_str(
+            r#"{"tray_offset":42,"widget_visible":true,"show_claude_code":true}"#,
+        )
+        .expect("legacy settings should remain readable");
+
+        assert_eq!(settings.widget_placement, WidgetPlacement::Taskbar);
+        assert_eq!(settings.floating_x, None);
+        assert_eq!(settings.floating_y, None);
+    }
+
+    #[test]
+    fn floating_placement_and_position_round_trip() {
+        let settings = SettingsFile {
+            widget_placement: WidgetPlacement::Floating,
+            floating_x: Some(320),
+            floating_y: Some(180),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&settings).expect("settings should serialize");
+        let restored: SettingsFile =
+            serde_json::from_str(&json).expect("settings should deserialize");
+
+        assert_eq!(restored.widget_placement, WidgetPlacement::Floating);
+        assert_eq!(restored.floating_x, Some(320));
+        assert_eq!(restored.floating_y, Some(180));
+    }
+
+    #[test]
+    fn drag_handle_has_a_discoverable_hit_area() {
+        let center_y = sc(WIDGET_HEIGHT) / 2;
+
+        assert!(is_drag_handle_point(sc(11), center_y));
+        assert!(!is_drag_handle_point(sc(12), center_y));
+    }
+
+    #[test]
+    fn floating_position_defaults_inside_work_area_and_clamps_saved_coordinates() {
+        let work_area = RECT {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+
+        assert_eq!(
+            resolve_floating_position(work_area, 300, 46, None, None, 16),
+            (1604, 978)
+        );
+        assert_eq!(
+            resolve_floating_position(work_area, 300, 46, Some(-500), Some(5000), 16),
+            (0, 994)
+        );
     }
 }

@@ -63,6 +63,7 @@ credentials and send them to the corresponding official usage endpoints. See
 - Left-click the tray icon to toggle the taskbar widget on or off
 - Right-click options for refresh, displayed models, update frequency, language, startup, widget visibility, and updates
 - Multi-monitor taskbar placement, so the widget can live on the taskbar for the screen you prefer
+- Taskbar, freely movable floating-window, and tray-only placement modes
 
 ## Who This Is For
 
@@ -102,8 +103,10 @@ claude-code-usage-monitor
 
 Once running, it will appear in your taskbar and as one or more tray icons in the notification area.
 
-- Drag the left divider to move the taskbar widget
+- Drag the visible grip on the left edge to move the widget
 - On multi-monitor setups, drag the widget onto another Windows taskbar to move it to that screen
+- Use **Settings → Placement → Floating** to move the widget anywhere on screen
+- Use **Settings → Placement → Tray only** to hide the widget while keeping its tray icons
 - Right-click the taskbar widget or tray icon for refresh, displayed models, update frequency, Start with Windows, reset position, language, updates, and exit
 - Left-click the tray icon to toggle the taskbar widget on or off
 - Enable `Start with Windows` from the right-click menu if you want it to launch automatically when you sign in
@@ -182,6 +185,7 @@ What the app stores locally:
 
 - Widget position
 - Selected taskbar / screen
+- Placement mode and floating-window position
 - Widget visibility
 - Polling frequency
 - Language preference
@@ -266,3 +270,8 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
 Для запуска нужны Windows 10/11 и уже авторизованный Claude Code. Поддержка
 Codex и Google Antigravity включается опционально. Если токен истёк, сначала
 войдите в соответствующий CLI вручную, а затем запустите монитор.
+
+Через **Настройки → Размещение** можно оставить виджет в панели задач,
+переключить его в свободно перемещаемое плавающее окно или оставить только
+значки в системном трее. Для перемещения используется заметная ручка на левом
+краю виджета; позиция сохраняется между запусками.

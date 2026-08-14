@@ -117,13 +117,17 @@ pub fn get_window_rect_safe(hwnd: HWND) -> Option<RECT> {
 /// Embed our window as a child of the taskbar
 pub fn embed_in_taskbar(hwnd: HWND, taskbar_hwnd: HWND) {
     unsafe {
-        // Preserve existing extended style, add tool window + no activate
+        // Preserve existing extended style, add tool window + no activate.
+        // Toggling WS_EX_LAYERED resets SetLayeredWindowAttributes state so
+        // UpdateLayeredWindow works again after returning from floating mode.
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        let desired_ex_style = ex_style | WS_EX_TOOLWINDOW.0 as i32 | WS_EX_NOACTIVATE.0 as i32;
         let _ = SetWindowLongW(
             hwnd,
             GWL_EXSTYLE,
-            ex_style | WS_EX_TOOLWINDOW.0 as i32 | WS_EX_NOACTIVATE.0 as i32,
+            desired_ex_style & !(WS_EX_LAYERED.0 as i32),
         );
+        let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, desired_ex_style | WS_EX_LAYERED.0 as i32);
 
         // Change from popup to child
         let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
@@ -131,6 +135,27 @@ pub fn embed_in_taskbar(hwnd: HWND, taskbar_hwnd: HWND) {
         let _ = SetWindowLongW(hwnd, GWL_STYLE, new_style as i32);
 
         let _ = SetParent(hwnd, taskbar_hwnd);
+    }
+}
+
+/// Detach an embedded widget and restore it as a top-level popup window.
+pub fn detach_from_taskbar(hwnd: HWND) {
+    unsafe {
+        let _ = SetParent(hwnd, HWND::default());
+
+        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+        let new_style = (style & !WS_CHILD_STYLE & !WS_CLIPSIBLINGS_STYLE) | WS_POPUP_STYLE;
+        let _ = SetWindowLongW(hwnd, GWL_STYLE, new_style as i32);
+
+        let _ = SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
     }
 }
 
