@@ -168,8 +168,6 @@ pub struct Strings {
     pub up_to_date: &'static str,
     pub up_to_date_short: &'static str,
     pub update_failed: &'static str,
-    pub applying_update: &'static str,
-    pub update_to: &'static str,
     pub update_available: &'static str,
     pub update_prompt_now: &'static str,
     pub exit: &'static str,

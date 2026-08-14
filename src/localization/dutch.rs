@@ -26,8 +26,6 @@ pub(super) const STRINGS: Strings = Strings {
     up_to_date: "Je gebruikt al de nieuwste versie.",
     up_to_date_short: "Up-to-date",
     update_failed: "Automatisch bijwerken mislukt",
-    applying_update: "Update wordt toegepast...",
-    update_to: "Bijwerken naar",
     update_available: "Update beschikbaar",
     update_prompt_now: "Versie {version} is beschikbaar. Wil je nu bijwerken?",
     exit: "Afsluiten",

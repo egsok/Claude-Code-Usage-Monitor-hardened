@@ -1,13 +1,55 @@
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-# Claude Code Usage Monitor
+# Claude Code Usage Monitor Hardened
+
+[English](#english) · [Русский](#русский)
+
+This is a security-focused fork of
+[CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor).
+The original project provides a useful native Windows taskbar monitor. This fork
+keeps that functionality while narrowing what a passive monitoring utility is
+allowed to execute and update on the user's machine.
 
 ![Screenshot](.github/animation.gif)
+
+## English
 
 A lightweight Windows taskbar widget for people already using Claude Code, with optional Codex and Google Antigravity usage display.
 
 It sits in your taskbar and shows how much of your Claude Code, Codex, and/or Antigravity usage window you have left, without needing to open the terminal or the provider site.
+
+### Why This Fork Exists
+
+During a source review, we found two behaviors that were useful for convenience
+but broader than we want from a passive usage monitor:
+
+1. When credentials expired, the original app could start Claude Code or Codex
+   CLI commands in the inherited working directory to trigger an authentication
+   refresh. Agent CLIs can load project-local configuration, instructions, and
+   hooks, so launching them implicitly creates behavior beyond simply reading
+   usage information.
+2. The portable self-updater could download the executable from the latest
+   GitHub release and replace the running binary without a separately verified
+   digital signature or checksum.
+
+These behaviors appeared to be convenience features; we found no indication of
+malicious intent. This fork simply adopts a narrower trust model.
+
+### Hardened Changes
+
+- Never launches Claude Code or Codex CLI commands. If authentication expires,
+  the app reports the problem and waits for the user to log in manually.
+- Disables executable download and replacement for portable builds.
+- Keeps release checks informational. A dedicated WinGet package will be the
+  only supported automatic update path once it is published.
+- Includes a regression test that guards against reintroducing background agent
+  CLI launches.
+- Uses a repository and future package identity separate from the upstream app.
+
+This remains a local credential-reading utility: it must read provider OAuth
+credentials and send them to the corresponding official usage endpoints. See
+[Privacy And Security](#privacy-and-security) for the exact data flow.
 
 ## What You Get
 
@@ -43,17 +85,16 @@ If you use Claude Code through WSL, that is supported too. The monitor can read 
 
 ## Install
 
-Install the latest version from WinGet:
+The dedicated hardened WinGet package is not published yet. Until it is available,
+build from source or download `claude-code-usage-monitor.exe` from this fork's
+[Releases](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases) page.
 
-```powershell
-winget install CodeZeno.ClaudeCodeUsageMonitor
-```
-
-If you prefer not to use WinGet, you can still download the latest `claude-code-usage-monitor.exe` from the [Releases](https://github.com/CodeZeno/Claude-Code-Usage-Monitor/releases) page and run it directly.
+Portable builds never update themselves. Once the dedicated package is published,
+WinGet will be the only supported update channel.
 
 ## Use
 
-After installing with WinGet, run:
+Run:
 
 ```powershell
 claude-code-usage-monitor
@@ -134,7 +175,7 @@ What the app sends over the network:
 - Requests to Anthropic's Claude endpoints to read your usage and rate-limit information
 - Requests to ChatGPT's Codex usage endpoint to read your Codex usage and rate-limit information, if Codex is enabled
 - Requests to Google's Cloud Code / Antigravity endpoints to read your Antigravity quota information, if Antigravity is enabled
-- Requests to GitHub only if you use the app's update check / self-update feature
+- Requests to GitHub only when the app checks this fork for a newer release
 - If proxy environment variables such as `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY` are set, those outbound requests may use that proxy
 
 What the app stores locally:
@@ -157,10 +198,10 @@ What it does **not** do:
 
 Notes:
 
-- If your Claude Code token is expired, the app may ask the local Claude CLI to refresh it in the background
-- If your Codex token is expired, the app may ask the local Codex CLI to refresh it in the background. The monitor does not write `auth.json` itself; any credential update is handled by the Codex CLI.
+- If your Claude Code or Codex token is expired, the app reports an authentication error and waits for you to log in manually
+- The app never launches Claude Code or Codex CLI commands in the background
 - If your Antigravity token is expired, open Antigravity and sign in again. The monitor does not write Windows Credential Manager entries itself.
-- Portable installs can update themselves by downloading the latest release from this repository
+- Portable installs never download or replace executable files
 - Proxies should be trusted because proxied usage requests include your OAuth bearer token inside the TLS connection
 
 ## How It Works
@@ -180,3 +221,48 @@ If the newer usage endpoint is unavailable, it can fall back to reading the rate
 This project is licensed under MIT.
 
 If you want to inspect the behavior or audit the code, everything is in this repository.
+
+## Русский
+
+Это security-focused fork проекта
+[CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor) —
+полезного нативного Windows-виджета, который показывает лимиты Claude Code,
+Codex и Google Antigravity прямо в панели задач. Hardened-версия сохраняет эту
+функциональность, но сужает полномочия фоновой утилиты.
+
+### Почему появился этот fork
+
+При проверке исходного кода мы обнаружили два удобных, но нежелательных для
+пассивного монитора поведения:
+
+1. При истечении авторизации исходная версия могла сама запускать команды Claude
+   Code или Codex CLI в унаследованной рабочей директории, чтобы обновить токен.
+   Агентские CLI могут загружать локальные инструкции, конфигурацию и hooks
+   проекта, поэтому такой запуск способен делать больше, чем простое чтение
+   статистики использования.
+2. Portable self-updater мог скачать исполняемый файл из последнего GitHub
+   Release и заменить текущий `.exe` без отдельной проверки цифровой подписи или
+   контрольной суммы.
+
+Это выглядело как реализация функций для удобства, а не как злонамеренное
+поведение. Hardened-fork просто использует более строгую модель доверия.
+
+### Что изменено
+
+- Приложение никогда не запускает Claude Code или Codex CLI. Если авторизация
+  истекла, нужно самостоятельно войти в соответствующий CLI.
+- Portable-версия не скачивает и не заменяет собственный `.exe`.
+- Проверка GitHub Releases только сообщает о новой версии. После публикации
+  отдельного пакета автоматические обновления будут выполняться только через
+  WinGet.
+- Добавлен регрессионный тест, запрещающий возвращение фонового запуска агентов.
+- Репозиторий и будущий WinGet package ID отделены от оригинального проекта.
+
+Утилите по-прежнему требуется читать локальные OAuth-данные провайдеров и
+отправлять их на официальные endpoints статистики. Полный перечень читаемых,
+отправляемых и сохраняемых данных приведён в разделе
+[Privacy And Security](#privacy-and-security).
+
+Для запуска нужны Windows 10/11 и уже авторизованный Claude Code. Поддержка
+Codex и Google Antigravity включается опционально. Если токен истёк, сначала
+войдите в соответствующий CLI вручную, а затем запустите монитор.

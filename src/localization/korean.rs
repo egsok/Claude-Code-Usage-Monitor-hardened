@@ -26,8 +26,6 @@ pub(super) const STRINGS: Strings = Strings {
     up_to_date: "이미 최신 버전입니다.",
     up_to_date_short: "최신",
     update_failed: "자동 업데이트를 완료할 수 없습니다",
-    applying_update: "업데이트 적용 중...",
-    update_to: "업데이트 대상",
     update_available: "업데이트 사용 가능",
     update_prompt_now: "버전 {version}을 사용할 수 있습니다. 지금 업데이트하시겠습니까?",
     exit: "종료",

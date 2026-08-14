@@ -26,8 +26,6 @@ pub(super) const STRINGS: Strings = Strings {
     up_to_date: "您已使用最新版本。",
     up_to_date_short: "已是最新",
     update_failed: "无法自动更新",
-    applying_update: "正在应用更新...",
-    update_to: "更新至",
     update_available: "有可用更新",
     update_prompt_now: "版本 {version} 已可用。是否立即更新？",
     exit: "退出",

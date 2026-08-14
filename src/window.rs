@@ -97,7 +97,6 @@ struct AppState {
 enum UpdateStatus {
     Idle,
     Checking,
-    Applying,
     UpToDate,
     Available(ReleaseDescriptor),
 }
@@ -761,15 +760,13 @@ fn version_action_label(
     match status {
         UpdateStatus::Idle => format!("v{current} - {}", strings.check_for_updates),
         UpdateStatus::Checking => format!("v{current} - {}", strings.checking_for_updates),
-        UpdateStatus::Applying => format!("v{current} - {}", strings.applying_update),
         UpdateStatus::UpToDate => format!("v{current} - {}", strings.up_to_date_short),
         UpdateStatus::Available(release) => match install_channel {
-            InstallChannel::Portable => {
-                format!(
-                    "v{current} - {} v{}",
-                    strings.update_to, release.latest_version
-                )
-            }
+            InstallChannel::Portable => format!(
+                "v{current} - {} v{}",
+                localization::update_via_winget(language),
+                release.latest_version
+            ),
             InstallChannel::Winget => format!(
                 "v{current} - {} v{}",
                 localization::update_via_winget(language),
@@ -787,10 +784,7 @@ fn begin_update_check(hwnd: HWND, interactive: bool) {
             return;
         };
 
-        if matches!(
-            app_state.update_status,
-            UpdateStatus::Checking | UpdateStatus::Applying
-        ) {
+        if matches!(app_state.update_status, UpdateStatus::Checking) {
             if interactive {
                 show_info_message(
                     hwnd,
@@ -836,7 +830,7 @@ fn begin_update_check(hwnd: HWND, interactive: bool) {
                 save_state_settings();
                 if interactive && show_update_prompt(hwnd, strings, &release) {
                     match install_channel {
-                        InstallChannel::Portable => begin_update_apply(hwnd, release),
+                        InstallChannel::Portable => show_portable_update_disabled(hwnd),
                         InstallChannel::Winget => begin_winget_update(hwnd),
                     }
                 }
@@ -865,51 +859,14 @@ fn begin_update_check(hwnd: HWND, interactive: bool) {
     });
 }
 
-fn begin_update_apply(hwnd: HWND, release: ReleaseDescriptor) {
-    let send_hwnd = SendHwnd::from_hwnd(hwnd);
+fn show_portable_update_disabled(hwnd: HWND) {
     let strings = {
-        let mut state = lock_state();
-        let Some(app_state) = state.as_mut() else {
-            return;
-        };
+        let state = lock_state();
+        state.as_ref().map(|s| s.language.strings())
+    }
+    .unwrap_or(LanguageId::English.strings());
 
-        if matches!(
-            app_state.update_status,
-            UpdateStatus::Checking | UpdateStatus::Applying
-        ) {
-            show_info_message(
-                hwnd,
-                app_state.language.strings().updates,
-                app_state.language.strings().update_in_progress,
-            );
-            return;
-        }
-
-        app_state.update_status = UpdateStatus::Applying;
-        app_state.language.strings()
-    };
-
-    std::thread::spawn(move || {
-        let hwnd = send_hwnd.to_hwnd();
-        match updater::begin_self_update(&release) {
-            Ok(()) => unsafe {
-                let _ = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
-            },
-            Err(error) => {
-                {
-                    let mut state = lock_state();
-                    if let Some(s) = state.as_mut() {
-                        s.update_status = UpdateStatus::Available(release);
-                    }
-                }
-                let message = format!("{}.\n\n{}", strings.update_failed, error);
-                show_error_message(hwnd, strings.updates, &message);
-                unsafe {
-                    let _ = PostMessageW(hwnd, WM_APP_UPDATE_CHECK_COMPLETE, WPARAM(0), LPARAM(0));
-                }
-            }
-        }
-    });
+    show_info_message(hwnd, strings.updates, &updater::portable_update_message());
 }
 
 fn begin_winget_update(hwnd: HWND) {
@@ -2546,8 +2503,8 @@ unsafe extern "system" fn wnd_proc(
                             }
                         }
                         InstallChannel::Portable => {
-                            if let Some(release) = release {
-                                begin_update_apply(hwnd, release);
+                            if release.is_some() {
+                                show_portable_update_disabled(hwnd);
                             } else {
                                 begin_update_check(hwnd, true);
                             }
@@ -2917,10 +2874,7 @@ fn show_context_menu(hwnd: HWND) {
         let version_label =
             version_action_label(strings, language, install_channel, &update_status);
         let version_str = native_interop::wide_str(&version_label);
-        let version_flags = if matches!(
-            update_status,
-            UpdateStatus::Checking | UpdateStatus::Applying
-        ) {
+        let version_flags = if matches!(update_status, UpdateStatus::Checking) {
             MF_GRAYED
         } else {
             MENU_ITEM_FLAGS(0)

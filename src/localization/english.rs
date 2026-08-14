@@ -26,8 +26,6 @@ pub(super) const STRINGS: Strings = Strings {
     up_to_date: "You already have the latest version.",
     up_to_date_short: "Up to date",
     update_failed: "Unable to update automatically",
-    applying_update: "Applying update...",
-    update_to: "Update to",
     update_available: "Update available",
     update_prompt_now: "Version {version} is available. Do you want to update now?",
     exit: "Exit",
