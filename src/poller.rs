@@ -11,7 +11,7 @@ use std::os::windows::process::CommandExt;
 
 use crate::diagnose;
 use crate::localization::Strings;
-use crate::models::{AppUsageData, UsageData, UsageSection};
+use crate::models::{AppUsageData, ModelUsageLimit, UsageData, UsageSection};
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -47,12 +47,32 @@ pub type CredentialWatchSnapshot = Vec<String>;
 struct UsageResponse {
     five_hour: Option<UsageBucket>,
     seven_day: Option<UsageBucket>,
+    #[serde(default)]
+    limits: Vec<UsageLimit>,
 }
 
 #[derive(Deserialize)]
 struct UsageBucket {
     utilization: f64,
     resets_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UsageLimit {
+    kind: Option<String>,
+    percent: Option<f64>,
+    resets_at: Option<String>,
+    scope: Option<UsageLimitScope>,
+}
+
+#[derive(Deserialize)]
+struct UsageLimitScope {
+    model: Option<UsageLimitModel>,
+}
+
+#[derive(Deserialize)]
+struct UsageLimitModel {
+    display_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -470,6 +490,10 @@ fn try_usage_endpoint(token: &str) -> Result<Option<UsageData>, PollError> {
         Ok(response) => response,
         Err(_) => return Ok(None),
     };
+    Ok(Some(usage_data_from_response(response)))
+}
+
+fn usage_data_from_response(response: UsageResponse) -> UsageData {
     let mut data = UsageData::default();
 
     if let Some(bucket) = &response.five_hour {
@@ -482,7 +506,24 @@ fn try_usage_endpoint(token: &str) -> Result<Option<UsageData>, PollError> {
         data.weekly.resets_at = parse_iso8601(bucket.resets_at.as_deref());
     }
 
-    Ok(Some(data))
+    data.scoped_weekly = response
+        .limits
+        .into_iter()
+        .filter(|limit| limit.kind.as_deref() == Some("weekly_scoped"))
+        .filter_map(|limit| {
+            let model_name = limit.scope?.model?.display_name?;
+            let percentage = limit.percent?;
+            Some(ModelUsageLimit {
+                model_name,
+                usage: UsageSection {
+                    percentage,
+                    resets_at: parse_iso8601(limit.resets_at.as_deref()),
+                },
+            })
+        })
+        .collect();
+
+    data
 }
 
 fn fetch_usage_via_messages(token: &str) -> Result<UsageData, PollError> {
@@ -672,7 +713,11 @@ fn fetch_antigravity_usage_from_endpoint(
     let session = fetch_antigravity_model_quota(base_url, token, project.as_deref())?;
     let weekly = UsageSection::default();
 
-    Ok(UsageData { session, weekly })
+    Ok(UsageData {
+        session,
+        weekly,
+        ..Default::default()
+    })
 }
 
 fn fetch_antigravity_project(base_url: &str, token: &str) -> Result<Option<String>, PollError> {
@@ -1285,6 +1330,17 @@ pub fn format_line(section: &UsageSection, strings: Strings) -> String {
     }
 }
 
+/// Compact taskbar form without spaces around the separator.
+pub fn format_compact_line(section: &UsageSection, strings: Strings) -> String {
+    let pct = format!("{:.0}%", section.percentage);
+    let cd = format_countdown(section.resets_at, strings);
+    if cd.is_empty() {
+        pct
+    } else {
+        format!("{pct}\u{00b7}{cd}")
+    }
+}
+
 fn format_countdown(resets_at: Option<SystemTime>, strings: Strings) -> String {
     let reset = match resets_at {
         Some(t) => t,
@@ -1340,11 +1396,13 @@ fn time_until_display_change_from_secs(total_secs: u64) -> Duration {
     Duration::from_secs(total_secs.saturating_sub(current_bucket_start) + 1)
 }
 
-/// Returns true if either section has reached "now" (reset time has passed).
+/// Returns true if any displayed section has reached "now" (reset time has passed).
 pub fn is_past_reset(data: &UsageData) -> bool {
     let now = SystemTime::now();
     let past = |s: &UsageSection| matches!(s.resets_at, Some(t) if now.duration_since(t).is_ok());
-    past(&data.session) || past(&data.weekly)
+    past(&data.session)
+        || past(&data.weekly)
+        || data.scoped_weekly.iter().any(|limit| past(&limit.usage))
 }
 
 pub fn app_is_past_reset(data: &AppUsageData) -> bool {
@@ -1387,7 +1445,47 @@ mod tests {
                 resets_at: None,
             },
             weekly: UsageSection::default(),
+            ..Default::default()
         }
+    }
+
+    #[test]
+    fn parses_dynamic_fable_weekly_limit_from_existing_usage_response() {
+        let response: UsageResponse = serde_json::from_str(
+            r#"{
+                "five_hour": {"utilization": 9.0, "resets_at": null},
+                "seven_day": {"utilization": 4.0, "resets_at": null},
+                "limits": [
+                    {
+                        "kind": "weekly_scoped",
+                        "percent": 7.0,
+                        "resets_at": "2026-08-18T00:00:00Z",
+                        "scope": {
+                            "model": {"id": "fable", "display_name": "Fable"},
+                            "surface": null
+                        }
+                    },
+                    {
+                        "kind": "session",
+                        "percent": 9.0,
+                        "resets_at": null,
+                        "scope": null
+                    }
+                ]
+            }"#,
+        )
+        .expect("current usage response should deserialize");
+
+        let data = usage_data_from_response(response);
+        let fable = data
+            .scoped_weekly_for("fable")
+            .expect("Fable should be retained as a model-scoped weekly limit");
+
+        assert_eq!(data.session.percentage, 9.0);
+        assert_eq!(data.weekly.percentage, 4.0);
+        assert_eq!(fable.percentage, 7.0);
+        assert!(fable.resets_at.is_some());
+        assert_eq!(data.scoped_weekly.len(), 1);
     }
 
     #[test]

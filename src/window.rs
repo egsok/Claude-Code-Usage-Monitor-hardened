@@ -59,6 +59,8 @@ struct AppState {
     session_text: String,
     weekly_percent: f64,
     weekly_text: String,
+    fable_percent: Option<f64>,
+    fable_text: String,
     codex_session_percent: f64,
     codex_session_text: String,
     codex_weekly_percent: f64,
@@ -430,14 +432,19 @@ fn tray_icon_data_from_state() -> Vec<tray_icon::TrayIconData> {
         Some(s) if s.last_poll_ok => {
             let mut icons = Vec::new();
             if s.show_claude_code {
+                let fable_tooltip = s
+                    .fable_percent
+                    .map(|_| format!(" | Fable: {}", s.fable_text))
+                    .unwrap_or_default();
                 icons.push(tray_icon::TrayIconData {
                     kind: tray_icon::TrayIconKind::Claude,
                     percent: Some(s.session_percent),
                     tooltip: format!(
-                        "{} 5h: {} | 7d: {}",
+                        "{} 5h: {} | 7d: {}{}",
                         s.language.strings().claude_code_model,
                         s.session_text,
-                        s.weekly_text
+                        s.weekly_text,
+                        fable_tooltip
                     ),
                 });
             }
@@ -745,9 +752,18 @@ fn refresh_usage_texts(state: &mut AppState) {
     if let Some(claude_code) = data.claude_code.as_ref() {
         state.session_text = poller::format_line(&claude_code.session, strings);
         state.weekly_text = poller::format_line(&claude_code.weekly, strings);
+        if let Some(fable) = claude_code.scoped_weekly_for("Fable") {
+            state.fable_percent = Some(fable.percentage);
+            state.fable_text = poller::format_compact_line(fable, strings);
+        } else {
+            state.fable_percent = None;
+            state.fable_text.clear();
+        }
     } else if state.show_claude_code {
         state.session_text = "!".to_string();
         state.weekly_text = "!".to_string();
+        state.fable_percent = None;
+        state.fable_text.clear();
     }
 
     if let Some(codex) = data.codex.as_ref() {
@@ -1105,6 +1121,10 @@ const SEGMENT_H: i32 = 13;
 const SEGMENT_GAP: i32 = 1;
 const SEGMENT_COUNT: i32 = 10;
 const CORNER_RADIUS: i32 = 2;
+const MINI_SEGMENT_W: i32 = 5;
+const COMPACT_VALUE_W: i32 = 27;
+const FABLE_LABEL_W: i32 = 8;
+const COMPACT_GAP: i32 = 2;
 
 const LEFT_DIVIDER_W: i32 = 12;
 const DIVIDER_RIGHT_MARGIN: i32 = 6;
@@ -1355,6 +1375,8 @@ pub fn run() {
                 session_text: "--".to_string(),
                 weekly_percent: 0.0,
                 weekly_text: "--".to_string(),
+                fable_percent: None,
+                fable_text: String::new(),
                 codex_session_percent: 0.0,
                 codex_session_text: "--".to_string(),
                 codex_weekly_percent: 0.0,
@@ -1488,6 +1510,8 @@ fn render_layered() {
         session_text,
         weekly_pct,
         weekly_text,
+        fable_pct,
+        fable_text,
         codex_session_pct,
         codex_session_text,
         codex_weekly_pct,
@@ -1511,6 +1535,8 @@ fn render_layered() {
                 s.session_text.clone(),
                 s.weekly_percent,
                 s.weekly_text.clone(),
+                s.fable_percent,
+                s.fable_text.clone(),
                 s.codex_session_percent,
                 s.codex_session_text.clone(),
                 s.codex_weekly_percent,
@@ -1606,6 +1632,8 @@ fn render_layered() {
             &session_text,
             weekly_pct,
             &weekly_text,
+            fable_pct,
+            &fable_text,
             codex_session_pct,
             &codex_session_text,
             codex_weekly_pct,
@@ -1682,6 +1710,8 @@ fn paint_content(
     session_text: &str,
     weekly_pct: f64,
     weekly_text: &str,
+    fable_pct: Option<f64>,
+    fable_text: &str,
     codex_session_pct: f64,
     codex_session_text: &str,
     codex_weekly_pct: f64,
@@ -1789,6 +1819,7 @@ fn paint_content(
             show_claude_code,
             show_codex,
             show_antigravity,
+            None,
             accent,
             codex_accent,
             antigravity_accent,
@@ -1810,6 +1841,7 @@ fn paint_content(
             show_claude_code,
             show_codex,
             show_antigravity,
+            fable_pct.map(|percentage| (percentage, fable_text)),
             accent,
             codex_accent,
             antigravity_accent,
@@ -1923,6 +1955,8 @@ fn do_poll(send_hwnd: SendHwnd) {
                             s.auth_watch_snapshot = watch_snapshot;
                             s.session_text = "!".to_string();
                             s.weekly_text = "!".to_string();
+                            s.fable_percent = None;
+                            s.fable_text.clear();
                             s.codex_session_text = "!".to_string();
                             s.codex_weekly_text = "!".to_string();
                             s.antigravity_session_text = "!".to_string();
@@ -1943,6 +1977,9 @@ fn do_poll(send_hwnd: SendHwnd) {
                             s.auth_watch_snapshot.clear();
                             s.session_text = "...".to_string();
                             s.weekly_text = "...".to_string();
+                            if s.fable_percent.is_some() {
+                                s.fable_text = "...".to_string();
+                            }
                             s.codex_session_text = "...".to_string();
                             s.codex_weekly_text = "...".to_string();
                             s.antigravity_session_text = "...".to_string();
@@ -2037,6 +2074,11 @@ fn schedule_countdown_timer() {
         data.claude_code
             .as_ref()
             .and_then(|usage| poller::time_until_display_change(usage.weekly.resets_at)),
+        data.claude_code.as_ref().and_then(|usage| {
+            usage
+                .scoped_weekly_for("Fable")
+                .and_then(|fable| poller::time_until_display_change(fable.resets_at))
+        }),
         data.codex
             .as_ref()
             .and_then(|usage| poller::time_until_display_change(usage.session.resets_at)),
@@ -2709,6 +2751,9 @@ unsafe extern "system" fn wnd_proc(
                         if let Some(s) = state.as_mut() {
                             s.session_text = "...".to_string();
                             s.weekly_text = "...".to_string();
+                            if s.fable_percent.is_some() {
+                                s.fable_text = "...".to_string();
+                            }
                             s.codex_session_text = "...".to_string();
                             s.codex_weekly_text = "...".to_string();
                             s.force_notify_auth_error = true;
@@ -2831,6 +2876,8 @@ unsafe extern "system" fn wnd_proc(
                             }
                             s.session_text = "...".to_string();
                             s.weekly_text = "...".to_string();
+                            s.fable_percent = None;
+                            s.fable_text.clear();
                             s.codex_session_text = "...".to_string();
                             s.codex_weekly_text = "...".to_string();
                             s.antigravity_session_text = "...".to_string();
@@ -3232,6 +3279,8 @@ fn paint(hdc: HDC, hwnd: HWND) {
         session_text,
         weekly_pct,
         weekly_text,
+        fable_pct,
+        fable_text,
         codex_session_pct,
         codex_session_text,
         codex_weekly_pct,
@@ -3253,6 +3302,8 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.session_text.clone(),
                 s.weekly_percent,
                 s.weekly_text.clone(),
+                s.fable_percent,
+                s.fable_text.clone(),
                 s.codex_session_percent,
                 s.codex_session_text.clone(),
                 s.codex_weekly_percent,
@@ -3316,6 +3367,8 @@ fn paint(hdc: HDC, hwnd: HWND) {
             &session_text,
             weekly_pct,
             &weekly_text,
+            fable_pct,
+            &fable_text,
             codex_session_pct,
             &codex_session_text,
             codex_weekly_pct,
@@ -3355,6 +3408,7 @@ fn draw_row(
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
+    claude_scoped_weekly: Option<(f64, &str)>,
     claude_accent: &Color,
     codex_accent: &Color,
     antigravity_accent: &Color,
@@ -3398,17 +3452,33 @@ fn draw_row(
 
         let mut model_x = x + sc(LABEL_WIDTH) + sc(LABEL_RIGHT_MARGIN);
         if show_claude_code {
-            draw_usage_bar(
-                hdc,
-                model_x,
-                y,
-                segment_count,
-                claude_percent,
-                claude_text,
-                claude_accent,
-                track,
-                &claude_value_color,
-            );
+            if let Some((fable_percent, fable_text)) = claude_scoped_weekly {
+                draw_scoped_weekly_bar(
+                    hdc,
+                    model_x,
+                    y,
+                    model_usage_width(segment_count),
+                    active_models,
+                    claude_percent,
+                    fable_percent,
+                    fable_text,
+                    claude_accent,
+                    track,
+                    &claude_value_color,
+                );
+            } else {
+                draw_usage_bar(
+                    hdc,
+                    model_x,
+                    y,
+                    segment_count,
+                    claude_percent,
+                    claude_text,
+                    claude_accent,
+                    track,
+                    &claude_value_color,
+                );
+            }
             model_x += model_usage_width(segment_count) + sc(MODEL_RIGHT_MARGIN);
         }
         if show_codex {
@@ -3447,6 +3517,77 @@ fn model_usage_width(segment_count: i32) -> i32 {
         + sc(TEXT_WIDTH)
 }
 
+fn compact_scoped_segment_count(active_models: i32) -> i32 {
+    if active_models >= 3 {
+        2
+    } else {
+        3
+    }
+}
+
+fn usage_segments_width(segment_count: i32, segment_width: i32) -> i32 {
+    segment_count * (sc(segment_width) + sc(SEGMENT_GAP)) - sc(SEGMENT_GAP)
+}
+
+fn scoped_weekly_fable_text_width(width: i32, active_models: i32) -> i32 {
+    let segment_count = compact_scoped_segment_count(active_models);
+    let bar_width = usage_segments_width(segment_count, MINI_SEGMENT_W);
+    width - bar_width * 2 - sc(COMPACT_GAP * 3 + COMPACT_VALUE_W + FABLE_LABEL_W + 1)
+}
+
+fn draw_scoped_weekly_bar(
+    hdc: HDC,
+    x: i32,
+    y: i32,
+    width: i32,
+    active_models: i32,
+    weekly_percent: f64,
+    fable_percent: f64,
+    fable_text: &str,
+    accent: &Color,
+    track: &Color,
+    text_color: &Color,
+) {
+    let segment_count = compact_scoped_segment_count(active_models);
+    let bar_width = draw_usage_segments(
+        hdc,
+        x,
+        y,
+        segment_count,
+        MINI_SEGMENT_W,
+        weekly_percent,
+        accent,
+        track,
+    );
+    let mut cursor = x + bar_width + sc(COMPACT_GAP);
+    draw_usage_text(
+        hdc,
+        cursor,
+        y,
+        sc(COMPACT_VALUE_W),
+        &format!("{weekly_percent:.0}%"),
+        text_color,
+    );
+
+    cursor += sc(COMPACT_VALUE_W + COMPACT_GAP);
+    draw_usage_text(hdc, cursor, y, sc(FABLE_LABEL_W), "F", text_color);
+    cursor += sc(FABLE_LABEL_W + 1);
+
+    let fable_bar_width = draw_usage_segments(
+        hdc,
+        cursor,
+        y,
+        segment_count,
+        MINI_SEGMENT_W,
+        fable_percent,
+        accent,
+        track,
+    );
+    cursor += fable_bar_width + sc(COMPACT_GAP);
+    let text_width = scoped_weekly_fable_text_width(width, active_models);
+    draw_usage_text(hdc, cursor, y, text_width, fable_text, text_color);
+}
+
 fn draw_usage_bar(
     hdc: HDC,
     bar_x: i32,
@@ -3458,36 +3599,64 @@ fn draw_usage_bar(
     track: &Color,
     text_color: &Color,
 ) {
-    let seg_w = sc(SEGMENT_W);
+    let bar_width = draw_usage_segments(
+        hdc,
+        bar_x,
+        y,
+        segment_count,
+        SEGMENT_W,
+        percent,
+        accent,
+        track,
+    );
+    draw_usage_text(
+        hdc,
+        bar_x + bar_width + sc(BAR_RIGHT_MARGIN),
+        y,
+        sc(TEXT_WIDTH),
+        text,
+        text_color,
+    );
+}
+
+fn draw_usage_segments(
+    hdc: HDC,
+    bar_x: i32,
+    y: i32,
+    segment_count: i32,
+    segment_width: i32,
+    percent: f64,
+    accent: &Color,
+    track: &Color,
+) -> i32 {
+    let seg_w = sc(segment_width);
     let seg_h = sc(SEGMENT_H);
     let seg_gap = sc(SEGMENT_GAP);
-    let corner_r = sc(CORNER_RADIUS);
+    let corner_r = sc(CORNER_RADIUS).min(seg_w / 2);
+    let percent_clamped = percent.clamp(0.0, 100.0);
+    let segment_percent = 100.0 / segment_count as f64;
 
-    unsafe {
-        let percent_clamped = percent.clamp(0.0, 100.0);
-        let segment_percent = 100.0 / segment_count as f64;
+    for i in 0..segment_count {
+        let seg_x = bar_x + i * (seg_w + seg_gap);
+        let seg_start = (i as f64) * segment_percent;
+        let seg_end = seg_start + segment_percent;
+        let seg_rect = RECT {
+            left: seg_x,
+            top: y,
+            right: seg_x + seg_w,
+            bottom: y + seg_h,
+        };
 
-        for i in 0..segment_count {
-            let seg_x = bar_x + i * (seg_w + seg_gap);
-            let seg_start = (i as f64) * segment_percent;
-            let seg_end = seg_start + segment_percent;
-
-            let seg_rect = RECT {
-                left: seg_x,
-                top: y,
-                right: seg_x + seg_w,
-                bottom: y + seg_h,
-            };
-
-            if percent_clamped >= seg_end {
-                draw_rounded_rect(hdc, &seg_rect, accent, corner_r);
-            } else if percent_clamped <= seg_start {
-                draw_rounded_rect(hdc, &seg_rect, track, corner_r);
-            } else {
-                draw_rounded_rect(hdc, &seg_rect, track, corner_r);
-                let fraction = (percent_clamped - seg_start) / segment_percent;
-                let fill_width = (seg_w as f64 * fraction) as i32;
-                if fill_width > 0 {
+        if percent_clamped >= seg_end {
+            draw_rounded_rect(hdc, &seg_rect, accent, corner_r);
+        } else if percent_clamped <= seg_start {
+            draw_rounded_rect(hdc, &seg_rect, track, corner_r);
+        } else {
+            draw_rounded_rect(hdc, &seg_rect, track, corner_r);
+            let fraction = (percent_clamped - seg_start) / segment_percent;
+            let fill_width = (seg_w as f64 * fraction) as i32;
+            if fill_width > 0 {
+                unsafe {
                     let fill_rect = RECT {
                         left: seg_x,
                         top: y,
@@ -3511,16 +3680,24 @@ fn draw_usage_bar(
                 }
             }
         }
+    }
 
-        let text_x = bar_x + segment_count * (seg_w + seg_gap) - seg_gap + sc(BAR_RIGHT_MARGIN);
+    usage_segments_width(segment_count, segment_width)
+}
+
+fn draw_usage_text(hdc: HDC, x: i32, y: i32, width: i32, text: &str, color: &Color) {
+    if width <= 0 {
+        return;
+    }
+    unsafe {
         let mut text_wide: Vec<u16> = text.encode_utf16().collect();
         let mut text_rect = RECT {
-            left: text_x,
+            left: x,
             top: y,
-            right: text_x + sc(TEXT_WIDTH),
-            bottom: y + seg_h,
+            right: x + width,
+            bottom: y + sc(SEGMENT_H),
         };
-        let _ = SetTextColor(hdc, COLORREF(text_color.to_colorref()));
+        let _ = SetTextColor(hdc, COLORREF(color.to_colorref()));
         let _ = DrawTextW(
             hdc,
             &mut text_wide,
@@ -3606,5 +3783,19 @@ mod tests {
             resolve_floating_position(work_area, 300, 46, Some(-500), Some(5000), 16),
             (0, 994)
         );
+    }
+
+    #[test]
+    fn scoped_weekly_layout_keeps_room_for_fable_text_at_every_provider_count() {
+        for active_models in 1..=3 {
+            let row_segments = row_bar_segment_count(active_models);
+            let text_width =
+                scoped_weekly_fable_text_width(model_usage_width(row_segments), active_models);
+
+            assert!(
+                text_width >= sc(44),
+                "Fable value must remain readable with {active_models} enabled providers"
+            );
+        }
     }
 }

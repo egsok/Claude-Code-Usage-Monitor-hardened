@@ -55,6 +55,8 @@ credentials and send them to the corresponding official usage endpoints. See
 
 - A **5h** bar for your current 5-hour Claude usage window
 - A **7d** bar for your current 7-day window
+- A compact **Fable** weekly-limit indicator beside the overall 7-day Claude
+  limit, when Anthropic returns that model-specific quota
 - Optional Codex usage bars alongside Claude Code
 - Optional Antigravity model usage bars for Google's 5-hour and weekly Gemini quota windows
 - A live countdown until each limit resets
@@ -64,6 +66,16 @@ credentials and send them to the corresponding official usage endpoints. See
 - Right-click options for refresh, displayed models, update frequency, language, startup, widget visibility, and updates
 - Multi-monitor taskbar placement, so the widget can live on the taskbar for the screen you prefer
 - Taskbar, freely movable floating-window, and tray-only placement modes
+
+### Fable Weekly Limit
+
+When Anthropic returns a model-specific weekly Fable quota, the widget shows it
+as a separate compact `F` meter beside the overall `7d` Claude meter. Both
+values remain visible without increasing the Windows taskbar height. The Fable
+meter is hidden automatically for accounts whose usage response does not
+include that quota.
+
+![Compact Fable weekly-limit indicator in the Windows taskbar](.github/screenshots/fable-taskbar.png)
 
 ## Who This Is For
 
@@ -270,6 +282,14 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
 Для запуска нужны Windows 10/11 и уже авторизованный Claude Code. Поддержка
 Codex и Google Antigravity включается опционально. Если токен истёк, сначала
 войдите в соответствующий CLI вручную, а затем запустите монитор.
+
+Если Anthropic возвращает отдельный недельный лимит Fable, он показывается в
+строке `7d` рядом с общим недельным лимитом Claude как самостоятельный
+компактный индикатор `F`. Оба значения остаются видны без увеличения высоты
+панели задач. Если для аккаунта отдельный лимит Fable не возвращается, индикатор
+автоматически скрывается.
+
+![Компактный индикатор недельного лимита Fable в панели задач](.github/screenshots/fable-taskbar.png)
 
 Через **Настройки → Размещение** можно оставить виджет в панели задач,
 переключить его в свободно перемещаемое плавающее окно или оставить только
