@@ -11,7 +11,7 @@ use std::os::windows::process::CommandExt;
 
 use crate::diagnose;
 use crate::localization::Strings;
-use crate::models::{AppUsageData, UsageData, UsageSection};
+use crate::models::{AppUsageData, ModelUsageLimit, UsageData, UsageSection};
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -34,6 +34,14 @@ pub enum PollError {
     RequestFailed,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct PollOutcome {
+    pub data: AppUsageData,
+    pub claude_code_error: Option<PollError>,
+    pub codex_error: Option<PollError>,
+    pub antigravity_error: Option<PollError>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CredentialWatchMode {
     ActiveSource,
@@ -47,12 +55,32 @@ pub type CredentialWatchSnapshot = Vec<String>;
 struct UsageResponse {
     five_hour: Option<UsageBucket>,
     seven_day: Option<UsageBucket>,
+    #[serde(default)]
+    limits: Vec<UsageLimit>,
 }
 
 #[derive(Deserialize)]
 struct UsageBucket {
     utilization: f64,
     resets_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UsageLimit {
+    kind: Option<String>,
+    percent: Option<f64>,
+    resets_at: Option<String>,
+    scope: Option<UsageLimitScope>,
+}
+
+#[derive(Deserialize)]
+struct UsageLimitScope {
+    model: Option<UsageLimitModel>,
+}
+
+#[derive(Deserialize)]
+struct UsageLimitModel {
+    display_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -175,7 +203,7 @@ pub fn poll(
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
-) -> Result<AppUsageData, PollError> {
+) -> Result<PollOutcome, PollError> {
     poll_with(
         show_claude_code,
         show_codex,
@@ -193,18 +221,19 @@ fn poll_with(
     mut poll_claude_code: impl FnMut() -> Result<UsageData, PollError>,
     mut poll_codex: impl FnMut() -> Result<UsageData, PollError>,
     mut poll_antigravity: impl FnMut() -> Result<UsageData, PollError>,
-) -> Result<AppUsageData, PollError> {
-    let mut data = AppUsageData::default();
+) -> Result<PollOutcome, PollError> {
+    let mut outcome = PollOutcome::default();
     let mut first_error = None;
     let active_provider_count = show_claude_code as u8 + show_codex as u8 + show_antigravity as u8;
 
     if show_claude_code {
         match poll_claude_code() {
-            Ok(claude_code) => data.claude_code = Some(claude_code),
+            Ok(claude_code) => outcome.data.claude_code = Some(claude_code),
             Err(error) => {
                 if active_provider_count > 1 {
                     diagnose::log(format!("Claude Code usage poll failed: {error:?}"));
                 }
+                outcome.claude_code_error = Some(error);
                 first_error.get_or_insert(error);
             }
         }
@@ -212,11 +241,12 @@ fn poll_with(
 
     if show_codex {
         match poll_codex() {
-            Ok(codex) => data.codex = Some(codex),
+            Ok(codex) => outcome.data.codex = Some(codex),
             Err(error) => {
                 if active_provider_count > 1 {
                     diagnose::log(format!("Codex usage poll failed: {error:?}"));
                 }
+                outcome.codex_error = Some(error);
                 first_error.get_or_insert(error);
             }
         }
@@ -224,20 +254,24 @@ fn poll_with(
 
     if show_antigravity {
         match poll_antigravity() {
-            Ok(antigravity) => data.antigravity = Some(antigravity),
+            Ok(antigravity) => outcome.data.antigravity = Some(antigravity),
             Err(error) => {
                 if active_provider_count > 1 {
                     diagnose::log(format!("Antigravity usage poll failed: {error:?}"));
                 }
+                outcome.antigravity_error = Some(error);
                 first_error.get_or_insert(error);
             }
         }
     }
 
-    if data.claude_code.is_none() && data.codex.is_none() && data.antigravity.is_none() {
+    if outcome.data.claude_code.is_none()
+        && outcome.data.codex.is_none()
+        && outcome.data.antigravity.is_none()
+    {
         Err(first_error.unwrap_or(PollError::RequestFailed))
     } else {
-        Ok(data)
+        Ok(outcome)
     }
 }
 
@@ -250,7 +284,7 @@ fn poll_claude_code() -> Result<UsageData, PollError> {
         }
     };
 
-    let creds = refresh_or_fallback(creds)?;
+    let creds = fresh_credentials_or_fallback(creds)?;
 
     fetch_usage_with_fallback(&creds.access_token)
 }
@@ -264,15 +298,7 @@ fn poll_codex() -> Result<UsageData, PollError> {
         }
     };
 
-    match fetch_codex_usage(&creds.access_token, creds.account_id.as_deref()) {
-        Ok(data) => Ok(data),
-        Err(PollError::AuthRequired) => {
-            cli_refresh_codex_token();
-            let refreshed = read_codex_credentials().ok_or(PollError::TokenExpired)?;
-            fetch_codex_usage(&refreshed.access_token, refreshed.account_id.as_deref())
-        }
-        Err(error) => Err(error),
-    }
+    fetch_codex_usage(&creds.access_token, creds.account_id.as_deref())
 }
 
 fn poll_antigravity() -> Result<UsageData, PollError> {
@@ -287,162 +313,22 @@ fn poll_antigravity() -> Result<UsageData, PollError> {
     fetch_antigravity_usage(&creds.access_token)
 }
 
-fn refresh_or_fallback(mut creds: Credentials) -> Result<Credentials, PollError> {
+fn fresh_credentials_or_fallback(mut creds: Credentials) -> Result<Credentials, PollError> {
     loop {
         if !is_token_expired(creds.expires_at) {
             return Ok(creds);
         }
 
         let source = creds.source.clone();
-        cli_refresh_token(&source);
-
-        match read_credentials_from_source(&source) {
-            Some(refreshed) if !is_token_expired(refreshed.expires_at) => return Ok(refreshed),
-            Some(_) => diagnose::log(format!(
-                "credentials from {source:?} still expired after refresh attempt"
-            )),
-            None => diagnose::log(format!(
-                "credentials from {source:?} unavailable after refresh attempt"
-            )),
-        }
+        diagnose::log(format!(
+            "credentials from {source:?} are expired; manual login required"
+        ));
 
         match read_next_credentials_after(&source) {
             Some(next) => creds = next,
             None => return Err(PollError::TokenExpired),
         }
     }
-}
-
-/// Invoke the Claude CLI with a minimal prompt to force its internal
-/// OAuth token refresh.
-fn cli_refresh_token(source: &CredentialSource) {
-    match source {
-        CredentialSource::Windows(_) => cli_refresh_windows_token(),
-        CredentialSource::Wsl { distro } => cli_refresh_wsl_token(distro),
-    }
-}
-
-fn cli_refresh_windows_token() {
-    let claude_path = resolve_windows_claude_path();
-    let is_cmd = claude_path.to_lowercase().ends_with(".cmd");
-    diagnose::log(format!(
-        "attempting Windows Claude token refresh via {claude_path}"
-    ));
-
-    let args: &[&str] = &["-p", "."];
-
-    let mut cmd = if is_cmd {
-        let mut c = Command::new("cmd.exe");
-        c.arg("/c").arg(&claude_path).args(args);
-        c
-    } else {
-        let mut c = Command::new(&claude_path);
-        c.args(args);
-        c
-    };
-    cmd.env_remove("CLAUDECODE")
-        .env_remove("CLAUDE_CODE_ENTRYPOINT")
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(error) => {
-            diagnose::log_error("unable to spawn Windows Claude token refresh", error);
-            return;
-        }
-    };
-
-    // Wait up to 30 seconds — don't block the poll thread forever
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {
-                if start.elapsed() > Duration::from_secs(30) {
-                    let _ = child.kill();
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(500));
-            }
-            Err(_) => break,
-        }
-    }
-}
-
-fn cli_refresh_wsl_token(distro: &str) {
-    diagnose::log(format!(
-        "attempting WSL Claude token refresh in distro {distro}"
-    ));
-    let mut cmd = Command::new("wsl.exe");
-    cmd.arg("-d")
-        .arg(distro)
-        .arg("--")
-        .arg("bash")
-        .arg("-lic")
-        .arg("if command -v claude >/dev/null 2>&1; then claude -p .; elif [ -x \"$HOME/.local/bin/claude\" ]; then \"$HOME/.local/bin/claude\" -p .; else exit 127; fi")
-        .env_remove("CLAUDECODE")
-        .env_remove("CLAUDE_CODE_ENTRYPOINT")
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(error) => {
-            diagnose::log_error("unable to spawn WSL Claude token refresh", error);
-            return;
-        }
-    };
-
-    wait_for_refresh(&mut child);
-}
-
-fn cli_refresh_codex_token() {
-    let codex_path = resolve_windows_codex_path();
-    let is_cmd = codex_path.to_lowercase().ends_with(".cmd");
-    let is_ps1 = codex_path.to_lowercase().ends_with(".ps1");
-    diagnose::log(format!(
-        "attempting Windows Codex token refresh via {codex_path}"
-    ));
-
-    let args: &[&str] = &["exec", "."];
-
-    let mut cmd = if is_cmd {
-        let mut c = Command::new("cmd.exe");
-        c.arg("/c").arg(&codex_path).args(args);
-        c
-    } else if is_ps1 {
-        let mut c = Command::new("powershell.exe");
-        c.arg("-NoProfile")
-            .arg("-ExecutionPolicy")
-            .arg("Bypass")
-            .arg("-File")
-            .arg(&codex_path)
-            .args(args);
-        c
-    } else {
-        let mut c = Command::new(&codex_path);
-        c.args(args);
-        c
-    };
-    cmd.creation_flags(CREATE_NO_WINDOW)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(error) => {
-            diagnose::log_error("unable to spawn Windows Codex token refresh", error);
-            return;
-        }
-    };
-
-    wait_for_refresh(&mut child);
 }
 
 /// Spawn a command and wait up to `timeout` for it to finish.
@@ -464,95 +350,6 @@ fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> Option<std::process
             Err(_) => return None,
         }
     }
-}
-
-fn wait_for_refresh(child: &mut std::process::Child) {
-    // Wait up to 30 seconds; don't block the poll thread forever.
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {
-                if start.elapsed() > Duration::from_secs(30) {
-                    let _ = child.kill();
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(500));
-            }
-            Err(_) => break,
-        }
-    }
-}
-
-/// Resolve the full path to the `claude` CLI executable.
-fn resolve_windows_claude_path() -> String {
-    for name in &["claude.cmd", "claude"] {
-        if Command::new(name)
-            .arg("--version")
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok()
-        {
-            return name.to_string();
-        }
-    }
-
-    for name in &["claude.cmd", "claude"] {
-        if let Ok(output) = Command::new("where.exe")
-            .arg(name)
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-        {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if let Some(first_line) = stdout.lines().next() {
-                    let path = first_line.trim().to_string();
-                    if !path.is_empty() {
-                        return path;
-                    }
-                }
-            }
-        }
-    }
-
-    "claude.cmd".to_string()
-}
-
-fn resolve_windows_codex_path() -> String {
-    for name in &["codex.cmd", "codex.ps1", "codex.exe", "codex"] {
-        if Command::new(name)
-            .arg("--version")
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok()
-        {
-            return name.to_string();
-        }
-    }
-
-    for name in &["codex.cmd", "codex.ps1", "codex.exe", "codex"] {
-        if let Ok(output) = Command::new("where.exe")
-            .arg(name)
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-        {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if let Some(first_line) = stdout.lines().next() {
-                    let path = first_line.trim().to_string();
-                    if !path.is_empty() {
-                        return path;
-                    }
-                }
-            }
-        }
-    }
-
-    "codex.cmd".to_string()
 }
 
 fn build_agent() -> Result<ureq::Agent, PollError> {
@@ -707,6 +504,10 @@ fn try_usage_endpoint(token: &str) -> Result<Option<UsageData>, PollError> {
         Ok(response) => response,
         Err(_) => return Ok(None),
     };
+    Ok(Some(usage_data_from_response(response)))
+}
+
+fn usage_data_from_response(response: UsageResponse) -> UsageData {
     let mut data = UsageData::default();
 
     if let Some(bucket) = &response.five_hour {
@@ -719,7 +520,24 @@ fn try_usage_endpoint(token: &str) -> Result<Option<UsageData>, PollError> {
         data.weekly.resets_at = parse_iso8601(bucket.resets_at.as_deref());
     }
 
-    Ok(Some(data))
+    data.scoped_weekly = response
+        .limits
+        .into_iter()
+        .filter(|limit| limit.kind.as_deref() == Some("weekly_scoped"))
+        .filter_map(|limit| {
+            let model_name = limit.scope?.model?.display_name?;
+            let percentage = limit.percent?;
+            Some(ModelUsageLimit {
+                model_name,
+                usage: UsageSection {
+                    percentage,
+                    resets_at: parse_iso8601(limit.resets_at.as_deref()),
+                },
+            })
+        })
+        .collect();
+
+    data
 }
 
 fn fetch_usage_via_messages(token: &str) -> Result<UsageData, PollError> {
@@ -815,7 +633,7 @@ fn fetch_codex_usage(token: &str, account_id: Option<&str>) -> Result<UsageData,
         Ok(resp) => resp,
         Err(ureq::Error::Status(code, _)) if code == 401 || code == 403 => {
             diagnose::log(format!(
-                "Codex usage endpoint returned auth error status {code}; refresh required"
+                "Codex usage endpoint returned auth error status {code}; manual login required"
             ));
             return Err(PollError::AuthRequired);
         }
@@ -909,7 +727,11 @@ fn fetch_antigravity_usage_from_endpoint(
     let session = fetch_antigravity_model_quota(base_url, token, project.as_deref())?;
     let weekly = UsageSection::default();
 
-    Ok(UsageData { session, weekly })
+    Ok(UsageData {
+        session,
+        weekly,
+        ..Default::default()
+    })
 }
 
 fn fetch_antigravity_project(base_url: &str, token: &str) -> Result<Option<String>, PollError> {
@@ -1212,16 +1034,6 @@ fn read_windows_credentials() -> Option<Credentials> {
         }
     };
     parse_credentials(&content, CredentialSource::Windows(cred_path))
-}
-
-fn read_credentials_from_source(source: &CredentialSource) -> Option<Credentials> {
-    match source {
-        CredentialSource::Windows(path) => {
-            let content = std::fs::read_to_string(path).ok()?;
-            parse_credentials(&content, source.clone())
-        }
-        CredentialSource::Wsl { distro } => read_wsl_credentials(distro),
-    }
 }
 
 fn codex_auth_path() -> Option<PathBuf> {
@@ -1532,6 +1344,17 @@ pub fn format_line(section: &UsageSection, strings: Strings) -> String {
     }
 }
 
+/// Compact taskbar form without spaces around the separator.
+pub fn format_compact_line(section: &UsageSection, strings: Strings) -> String {
+    let pct = format!("{:.0}%", section.percentage);
+    let cd = format_countdown(section.resets_at, strings);
+    if cd.is_empty() {
+        pct
+    } else {
+        format!("{pct}\u{00b7}{cd}")
+    }
+}
+
 fn format_countdown(resets_at: Option<SystemTime>, strings: Strings) -> String {
     let reset = match resets_at {
         Some(t) => t,
@@ -1587,11 +1410,13 @@ fn time_until_display_change_from_secs(total_secs: u64) -> Duration {
     Duration::from_secs(total_secs.saturating_sub(current_bucket_start) + 1)
 }
 
-/// Returns true if either section has reached "now" (reset time has passed).
+/// Returns true if any displayed section has reached "now" (reset time has passed).
 pub fn is_past_reset(data: &UsageData) -> bool {
     let now = SystemTime::now();
     let past = |s: &UsageSection| matches!(s.resets_at, Some(t) if now.duration_since(t).is_ok());
-    past(&data.session) || past(&data.weekly)
+    past(&data.session)
+        || past(&data.weekly)
+        || data.scoped_weekly.iter().any(|limit| past(&limit.usage))
 }
 
 pub fn app_is_past_reset(data: &AppUsageData) -> bool {
@@ -1604,6 +1429,29 @@ pub fn app_is_past_reset(data: &AppUsageData) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn hardened_build_never_invokes_agent_clis() {
+        let source = include_str!("poller.rs");
+        let process_constructor = ["Command", "::new("].concat();
+        let allowed_wsl_constructor = ["Command", "::new(\"wsl.exe\")"].concat();
+        let claude_agent_args = ["&[\"", "-p", "\", \".\"]"].concat();
+        let codex_agent_args = ["&[\"", "exec", "\", \".\"]"].concat();
+
+        assert_eq!(
+            source.matches(&process_constructor).count(),
+            source.matches(&allowed_wsl_constructor).count(),
+            "polling may only start wsl.exe to read credential files"
+        );
+        assert!(
+            !source.contains(&claude_agent_args),
+            "the monitor must never start Claude Code as an agent"
+        );
+        assert!(
+            !source.contains(&codex_agent_args),
+            "the monitor must never start Codex as an agent"
+        );
+    }
+
     fn usage_with_session_percent(percentage: f64) -> UsageData {
         UsageData {
             session: UsageSection {
@@ -1611,12 +1459,52 @@ mod tests {
                 resets_at: None,
             },
             weekly: UsageSection::default(),
+            ..Default::default()
         }
     }
 
     #[test]
+    fn parses_dynamic_fable_weekly_limit_from_existing_usage_response() {
+        let response: UsageResponse = serde_json::from_str(
+            r#"{
+                "five_hour": {"utilization": 9.0, "resets_at": null},
+                "seven_day": {"utilization": 4.0, "resets_at": null},
+                "limits": [
+                    {
+                        "kind": "weekly_scoped",
+                        "percent": 7.0,
+                        "resets_at": "2026-08-18T00:00:00Z",
+                        "scope": {
+                            "model": {"id": "fable", "display_name": "Fable"},
+                            "surface": null
+                        }
+                    },
+                    {
+                        "kind": "session",
+                        "percent": 9.0,
+                        "resets_at": null,
+                        "scope": null
+                    }
+                ]
+            }"#,
+        )
+        .expect("current usage response should deserialize");
+
+        let data = usage_data_from_response(response);
+        let fable = data
+            .scoped_weekly_for("fable")
+            .expect("Fable should be retained as a model-scoped weekly limit");
+
+        assert_eq!(data.session.percentage, 9.0);
+        assert_eq!(data.weekly.percentage, 4.0);
+        assert_eq!(fable.percentage, 7.0);
+        assert!(fable.resets_at.is_some());
+        assert_eq!(data.scoped_weekly.len(), 1);
+    }
+
+    #[test]
     fn claude_failure_does_not_block_codex_when_both_are_enabled() {
-        let data = poll_with(
+        let outcome = poll_with(
             true,
             true,
             false,
@@ -1626,13 +1514,14 @@ mod tests {
         )
         .expect("codex data should keep the poll successful");
 
-        assert!(data.claude_code.is_none());
-        assert_eq!(data.codex.unwrap().session.percentage, 42.0);
+        assert!(outcome.data.claude_code.is_none());
+        assert_eq!(outcome.data.codex.unwrap().session.percentage, 42.0);
+        assert_eq!(outcome.claude_code_error, Some(PollError::AuthRequired));
     }
 
     #[test]
     fn codex_failure_does_not_block_claude_when_both_are_enabled() {
-        let data = poll_with(
+        let outcome = poll_with(
             true,
             true,
             false,
@@ -1642,8 +1531,9 @@ mod tests {
         )
         .expect("claude data should keep the poll successful");
 
-        assert_eq!(data.claude_code.unwrap().session.percentage, 64.0);
-        assert!(data.codex.is_none());
+        assert_eq!(outcome.data.claude_code.unwrap().session.percentage, 64.0);
+        assert!(outcome.data.codex.is_none());
+        assert_eq!(outcome.codex_error, Some(PollError::RequestFailed));
     }
 
     #[test]
@@ -1663,7 +1553,7 @@ mod tests {
 
     #[test]
     fn antigravity_failure_does_not_block_codex_when_both_are_enabled() {
-        let data = poll_with(
+        let outcome = poll_with(
             false,
             true,
             true,
@@ -1673,8 +1563,9 @@ mod tests {
         )
         .expect("codex data should keep the poll successful");
 
-        assert!(data.antigravity.is_none());
-        assert_eq!(data.codex.unwrap().session.percentage, 42.0);
+        assert!(outcome.data.antigravity.is_none());
+        assert_eq!(outcome.data.codex.unwrap().session.percentage, 42.0);
+        assert_eq!(outcome.antigravity_error, Some(PollError::NoCredentials));
     }
 
     #[test]
