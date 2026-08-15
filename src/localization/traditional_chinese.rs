@@ -40,12 +40,16 @@ pub(super) const STRINGS: Strings = Strings {
     day_suffix: "天",
     hour_suffix: "時",
     minute_suffix: "分",
-    token_expired_title: "驗證錯誤",
-    token_expired_body: "請在終端機中執行 'claude'，然後使用 '/login' 並依照提示操作。完成後，請重新整理或重新啟動此應用程式。",
+    token_expired_title: "Claude 使用量更新已暫停",
+    token_expired_body:
+        "請開啟 Claude Code 並傳送一則訊息。如果 Claude 要求，請重新登入。監控器會自動重新連線。",
+    last_updated: "上次更新",
     codex_token_expired_title: "Codex 驗證錯誤",
-    codex_token_expired_body: "請在終端機中執行 'codex'，並依照登入提示操作。完成後，請重新整理或重新啟動此應用程式。",
+    codex_token_expired_body:
+        "請在終端機中執行 'codex'，並依照登入提示操作。完成後，請重新整理或重新啟動此應用程式。",
     antigravity_token_expired_title: "Antigravity 驗證錯誤",
-    antigravity_token_expired_body: "請開啟 Antigravity 並重新登入。完成後，請重新整理或重新啟動此應用程式。",
+    antigravity_token_expired_body:
+        "請開啟 Antigravity 並重新登入。完成後，請重新整理或重新啟動此應用程式。",
     codex_window_title: "Codex 使用量監控",
     antigravity_window_title: "Antigravity 使用量監控",
     second_suffix: "秒",

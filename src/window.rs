@@ -20,8 +20,8 @@ use crate::diagnose;
 use crate::localization::{self, LanguageId, Strings};
 use crate::models::AppUsageData;
 use crate::native_interop::{
-    self, Color, TIMER_COUNTDOWN, TIMER_POLL, TIMER_RESET_POLL, TIMER_UPDATE_CHECK, WM_APP_TRAY,
-    WM_APP_USAGE_UPDATED,
+    self, Color, TIMER_COUNTDOWN, TIMER_CREDENTIAL_WATCH, TIMER_POLL, TIMER_RESET_POLL,
+    TIMER_UPDATE_CHECK, WM_APP_TRAY, WM_APP_USAGE_UPDATED,
 };
 use crate::poller;
 use crate::theme;
@@ -81,6 +81,9 @@ struct AppState {
     auth_error_paused_polling: bool,
     auth_watch_mode: poller::CredentialWatchMode,
     auth_watch_snapshot: poller::CredentialWatchSnapshot,
+    claude_usage_paused: bool,
+    claude_auth_watch_snapshot: poller::CredentialWatchSnapshot,
+    claude_last_success_unix: Option<u64>,
     last_poll_ok: bool,
     update_status: UpdateStatus,
     last_update_check_unix: Option<u64>,
@@ -118,6 +121,7 @@ enum WidgetPlacement {
 }
 
 const RETRY_BASE_MS: u32 = 30_000; // 30 seconds
+const CREDENTIAL_WATCH_MS: u32 = 2_000;
 
 const POLL_1_MIN: u32 = 60_000;
 const POLL_5_MIN: u32 = 300_000;
@@ -426,26 +430,53 @@ fn save_state_settings() {
     }
 }
 
+fn compact_age(last_success_unix: Option<u64>, strings: Strings) -> String {
+    let Some(last_success_unix) = last_success_unix else {
+        return "—".to_string();
+    };
+    let elapsed = now_unix_secs().saturating_sub(last_success_unix);
+    if elapsed < 60 {
+        strings.now.to_string()
+    } else if elapsed < 3_600 {
+        format!("{}{}", elapsed / 60, strings.minute_suffix)
+    } else if elapsed < 86_400 {
+        format!("{}{}", elapsed / 3_600, strings.hour_suffix)
+    } else {
+        format!("{}{}", elapsed / 86_400, strings.day_suffix)
+    }
+}
+
 fn tray_icon_data_from_state() -> Vec<tray_icon::TrayIconData> {
     let state = lock_state();
     match state.as_ref() {
-        Some(s) if s.last_poll_ok => {
+        Some(s) if s.last_poll_ok || s.claude_usage_paused => {
             let mut icons = Vec::new();
             if s.show_claude_code {
-                let fable_tooltip = s
-                    .fable_percent
-                    .map(|_| format!(" | Fable: {}", s.fable_text))
-                    .unwrap_or_default();
-                icons.push(tray_icon::TrayIconData {
-                    kind: tray_icon::TrayIconKind::Claude,
-                    percent: Some(s.session_percent),
-                    tooltip: format!(
+                let tooltip = if s.claude_usage_paused {
+                    format!(
+                        "{} — {} | {}: {}",
+                        s.language.strings().claude_code_model,
+                        s.language.strings().token_expired_title,
+                        s.language.strings().last_updated,
+                        compact_age(s.claude_last_success_unix, s.language.strings())
+                    )
+                } else {
+                    let fable_tooltip = s
+                        .fable_percent
+                        .map(|_| format!(" | Fable: {}", s.fable_text))
+                        .unwrap_or_default();
+                    format!(
                         "{} 5h: {} | 7d: {}{}",
                         s.language.strings().claude_code_model,
                         s.session_text,
                         s.weekly_text,
                         fable_tooltip
-                    ),
+                    )
+                };
+                icons.push(tray_icon::TrayIconData {
+                    kind: tray_icon::TrayIconKind::Claude,
+                    percent: (!s.claude_usage_paused).then_some(s.session_percent),
+                    tooltip,
                 });
             }
             if s.show_codex {
@@ -739,18 +770,23 @@ fn schedule_auto_update_check(hwnd: HWND) {
     }
 }
 
-fn refresh_usage_texts(state: &mut AppState) {
-    if !state.last_poll_ok {
-        return;
-    }
-
+fn refresh_claude_usage_texts(state: &mut AppState) {
     let strings = state.language.strings();
     let Some(data) = state.data.as_ref() else {
+        if state.show_claude_code && state.claude_usage_paused {
+            state.session_text = "— ↻".to_string();
+            state.weekly_text = "—".to_string();
+            state.fable_percent = None;
+            state.fable_text.clear();
+        }
         return;
     };
 
     if let Some(claude_code) = data.claude_code.as_ref() {
         state.session_text = poller::format_line(&claude_code.session, strings);
+        if state.claude_usage_paused {
+            state.session_text.push_str(" ↻");
+        }
         state.weekly_text = poller::format_line(&claude_code.weekly, strings);
         if let Some(fable) = claude_code.scoped_weekly_for("Fable") {
             state.fable_percent = Some(fable.percentage);
@@ -759,12 +795,30 @@ fn refresh_usage_texts(state: &mut AppState) {
             state.fable_percent = None;
             state.fable_text.clear();
         }
+    } else if state.show_claude_code && state.claude_usage_paused {
+        state.session_text = "— ↻".to_string();
+        state.weekly_text = "—".to_string();
+        state.fable_percent = None;
+        state.fable_text.clear();
     } else if state.show_claude_code {
         state.session_text = "!".to_string();
         state.weekly_text = "!".to_string();
         state.fable_percent = None;
         state.fable_text.clear();
     }
+}
+
+fn refresh_usage_texts(state: &mut AppState) {
+    if !state.last_poll_ok {
+        return;
+    }
+
+    refresh_claude_usage_texts(state);
+
+    let strings = state.language.strings();
+    let Some(data) = state.data.as_ref() else {
+        return;
+    };
 
     if let Some(codex) = data.codex.as_ref() {
         state.codex_session_text = poller::format_line(&codex.session, strings);
@@ -1395,6 +1449,9 @@ pub fn run() {
                 auth_error_paused_polling: false,
                 auth_watch_mode: poller::CredentialWatchMode::ActiveSource,
                 auth_watch_snapshot: Vec::new(),
+                claude_usage_paused: false,
+                claude_auth_watch_snapshot: Vec::new(),
+                claude_last_success_unix: None,
                 last_poll_ok: false,
                 update_status: UpdateStatus::Idle,
                 last_update_check_unix: settings.last_update_check_unix,
@@ -1523,6 +1580,7 @@ fn render_layered() {
         show_claude_code,
         show_codex,
         show_antigravity,
+        claude_usage_paused,
     ) = {
         let state = lock_state();
         match state.as_ref() {
@@ -1548,6 +1606,7 @@ fn render_layered() {
                 s.show_claude_code,
                 s.show_codex,
                 s.show_antigravity,
+                s.claude_usage_paused,
             ),
             None => return,
         }
@@ -1645,6 +1704,7 @@ fn render_layered() {
             show_claude_code,
             show_codex,
             show_antigravity,
+            claude_usage_paused,
             &codex_accent,
             &antigravity_accent,
         );
@@ -1723,6 +1783,7 @@ fn paint_content(
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
+    claude_usage_paused: bool,
     codex_accent: &Color,
     antigravity_accent: &Color,
 ) {
@@ -1819,6 +1880,7 @@ fn paint_content(
             show_claude_code,
             show_codex,
             show_antigravity,
+            claude_usage_paused,
             None,
             accent,
             codex_accent,
@@ -1841,6 +1903,7 @@ fn paint_content(
             show_claude_code,
             show_codex,
             show_antigravity,
+            claude_usage_paused,
             fable_pct.map(|percentage| (percentage, fable_text)),
             accent,
             codex_accent,
@@ -1851,6 +1914,44 @@ fn paint_content(
         SelectObject(hdc, old_font);
         let _ = DeleteObject(font);
     }
+}
+
+fn should_pause_claude_usage(error: Option<poller::PollError>) -> bool {
+    matches!(
+        error,
+        Some(
+            poller::PollError::AuthRequired
+                | poller::PollError::TokenExpired
+                | poller::PollError::NoCredentials
+        )
+    )
+}
+
+fn merge_app_usage_data(
+    previous: Option<AppUsageData>,
+    incoming: AppUsageData,
+    show_claude_code: bool,
+    show_codex: bool,
+    show_antigravity: bool,
+    preserve_claude: bool,
+) -> AppUsageData {
+    let mut merged = previous.unwrap_or_default();
+
+    if show_claude_code {
+        if incoming.claude_code.is_some() || !preserve_claude {
+            merged.claude_code = incoming.claude_code;
+        }
+    } else {
+        merged.claude_code = None;
+    }
+
+    merged.codex = if show_codex { incoming.codex } else { None };
+    merged.antigravity = if show_antigravity {
+        incoming.antigravity
+    } else {
+        None
+    };
+    merged
 }
 
 fn do_poll(send_hwnd: SendHwnd) {
@@ -1864,24 +1965,32 @@ fn do_poll(send_hwnd: SendHwnd) {
     };
 
     match poller::poll(show_claude_code, show_codex, show_antigravity) {
-        Ok(data) => {
+        Ok(outcome) => {
+            let claude_poll_succeeded = outcome.data.claude_code.is_some();
+            let claude_usage_paused =
+                show_claude_code && should_pause_claude_usage(outcome.claude_code_error);
+            let claude_watch_snapshot = claude_usage_paused.then(|| {
+                poller::credential_watch_snapshot(poller::CredentialWatchMode::ActiveSource)
+            });
+            let reset_data_is_fresh = !poller::app_is_past_reset(&outcome.data);
+            let mut notify_claude_paused = false;
             let mut state = lock_state();
             if let Some(s) = state.as_mut() {
-                if let Some(claude_code) = data.claude_code.as_ref() {
+                if let Some(claude_code) = outcome.data.claude_code.as_ref() {
                     s.session_percent = claude_code.session.percentage;
                     s.weekly_percent = claude_code.weekly.percentage;
-                } else if s.show_claude_code {
+                } else if s.show_claude_code && !claude_usage_paused {
                     s.session_percent = 0.0;
                     s.weekly_percent = 0.0;
                 }
-                if let Some(codex) = data.codex.as_ref() {
+                if let Some(codex) = outcome.data.codex.as_ref() {
                     s.codex_session_percent = codex.session.percentage;
                     s.codex_weekly_percent = codex.weekly.percentage;
                 } else if s.show_codex {
                     s.codex_session_percent = 0.0;
                     s.codex_weekly_percent = 0.0;
                 }
-                if let Some(antigravity) = data.antigravity.as_ref() {
+                if let Some(antigravity) = outcome.data.antigravity.as_ref() {
                     s.antigravity_session_percent = antigravity.session.percentage;
                     s.antigravity_weekly_percent = antigravity.weekly.percentage;
                 } else if s.show_antigravity {
@@ -1889,13 +1998,31 @@ fn do_poll(send_hwnd: SendHwnd) {
                     s.antigravity_weekly_percent = 0.0;
                 }
                 // Stop fast-poll if reset data is now fresh
-                if !poller::app_is_past_reset(&data) {
+                if reset_data_is_fresh {
                     unsafe {
                         let _ = KillTimer(hwnd, TIMER_RESET_POLL);
                     }
                 }
 
-                s.data = Some(data);
+                s.data = Some(merge_app_usage_data(
+                    s.data.take(),
+                    outcome.data,
+                    show_claude_code,
+                    show_codex,
+                    show_antigravity,
+                    claude_usage_paused || s.claude_usage_paused,
+                ));
+
+                if claude_poll_succeeded {
+                    s.claude_usage_paused = false;
+                    s.claude_auth_watch_snapshot.clear();
+                    s.claude_last_success_unix = Some(now_unix_secs());
+                } else if claude_usage_paused {
+                    notify_claude_paused = !s.claude_usage_paused || s.force_notify_auth_error;
+                    s.claude_usage_paused = true;
+                    s.claude_auth_watch_snapshot = claude_watch_snapshot.unwrap_or_default();
+                }
+
                 s.last_poll_ok = true;
                 refresh_usage_texts(s);
 
@@ -1912,12 +2039,40 @@ fn do_poll(send_hwnd: SendHwnd) {
                 s.auth_watch_mode = poller::CredentialWatchMode::ActiveSource;
                 s.auth_watch_snapshot.clear();
             }
+            drop(state);
+
+            unsafe {
+                if claude_usage_paused {
+                    SetTimer(hwnd, TIMER_CREDENTIAL_WATCH, CREDENTIAL_WATCH_MS, None);
+                } else if claude_poll_succeeded {
+                    let _ = KillTimer(hwnd, TIMER_CREDENTIAL_WATCH);
+                }
+            }
+
+            if notify_claude_paused {
+                let strings = {
+                    let state = lock_state();
+                    state.as_ref().map(|s| s.language.strings())
+                };
+                if let Some(strings) = strings {
+                    tray_icon::notify_balloon(
+                        hwnd,
+                        tray_icon::TrayIconKind::Claude,
+                        strings.token_expired_title,
+                        strings.token_expired_body,
+                    );
+                }
+            }
 
             unsafe {
                 let _ = PostMessageW(hwnd, WM_APP_USAGE_UPDATED, WPARAM(0), LPARAM(0));
             }
         }
         Err(e) => {
+            let claude_auth_failure = show_claude_code && should_pause_claude_usage(Some(e));
+            let claude_watch_snapshot = claude_auth_failure.then(|| {
+                poller::credential_watch_snapshot(poller::CredentialWatchMode::ActiveSource)
+            });
             let auth_watch = match e {
                 poller::PollError::AuthRequired | poller::PollError::TokenExpired
                     if show_antigravity && !show_claude_code && !show_codex =>
@@ -1995,9 +2150,21 @@ fn do_poll(send_hwnd: SendHwnd) {
                             }
                         }
                     }
+                    if claude_auth_failure {
+                        s.claude_usage_paused = true;
+                        s.claude_auth_watch_snapshot =
+                            claude_watch_snapshot.clone().unwrap_or_default();
+                        refresh_claude_usage_texts(s);
+                    }
                 }
                 should_notify
             };
+
+            if claude_auth_failure {
+                unsafe {
+                    SetTimer(hwnd, TIMER_CREDENTIAL_WATCH, CREDENTIAL_WATCH_MS, None);
+                }
+            }
 
             if notify_auth_error {
                 let balloon = {
@@ -2480,6 +2647,46 @@ unsafe extern "system" fn wnd_proc(
                             });
                         }
                         None => {}
+                    }
+                }
+                TIMER_CREDENTIAL_WATCH => {
+                    let credential_watch = {
+                        let state = lock_state();
+                        state.as_ref().and_then(|s| {
+                            if s.auth_error_paused_polling {
+                                Some((true, s.auth_watch_mode, s.auth_watch_snapshot.clone()))
+                            } else if s.claude_usage_paused {
+                                Some((
+                                    false,
+                                    poller::CredentialWatchMode::ActiveSource,
+                                    s.claude_auth_watch_snapshot.clone(),
+                                ))
+                            } else {
+                                None
+                            }
+                        })
+                    };
+
+                    if let Some((global_watch, watch_mode, previous_snapshot)) = credential_watch {
+                        let current_snapshot = poller::credential_watch_snapshot(watch_mode);
+                        if current_snapshot != previous_snapshot {
+                            let mut state = lock_state();
+                            if let Some(s) = state.as_mut() {
+                                if global_watch && s.auth_error_paused_polling {
+                                    s.auth_watch_snapshot = current_snapshot;
+                                } else if !global_watch && s.claude_usage_paused {
+                                    s.claude_auth_watch_snapshot = current_snapshot;
+                                }
+                            }
+                            drop(state);
+                            let _ = KillTimer(hwnd, TIMER_CREDENTIAL_WATCH);
+                            let sh = SendHwnd::from_hwnd(hwnd);
+                            std::thread::spawn(move || {
+                                do_poll(sh);
+                            });
+                        }
+                    } else {
+                        let _ = KillTimer(hwnd, TIMER_CREDENTIAL_WATCH);
                     }
                 }
                 TIMER_COUNTDOWN => {
@@ -3292,6 +3499,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
         show_claude_code,
         show_codex,
         show_antigravity,
+        claude_usage_paused,
     ) = {
         let state = lock_state();
         match state.as_ref() {
@@ -3315,6 +3523,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.show_claude_code,
                 s.show_codex,
                 s.show_antigravity,
+                s.claude_usage_paused,
             ),
             None => return,
         }
@@ -3380,6 +3589,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
             show_claude_code,
             show_codex,
             show_antigravity,
+            claude_usage_paused,
             &codex_accent,
             &antigravity_accent,
         );
@@ -3408,6 +3618,7 @@ fn draw_row(
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
+    claude_usage_paused: bool,
     claude_scoped_weekly: Option<(f64, &str)>,
     claude_accent: &Color,
     codex_accent: &Color,
@@ -3418,7 +3629,9 @@ fn draw_row(
     let active_models = active_model_count(show_claude_code, show_codex, show_antigravity);
     let segment_count = row_bar_segment_count(active_models);
     let use_model_text_colors = active_models > 1;
-    let claude_value_color = if use_model_text_colors {
+    let claude_value_color = if claude_usage_paused {
+        *text_color
+    } else if use_model_text_colors {
         claude_usage_text_color(is_dark)
     } else {
         *text_color
@@ -3452,6 +3665,11 @@ fn draw_row(
 
         let mut model_x = x + sc(LABEL_WIDTH) + sc(LABEL_RIGHT_MARGIN);
         if show_claude_code {
+            let claude_bar_color = if claude_usage_paused {
+                track
+            } else {
+                claude_accent
+            };
             if let Some((fable_percent, fable_text)) = claude_scoped_weekly {
                 draw_scoped_weekly_bar(
                     hdc,
@@ -3462,7 +3680,7 @@ fn draw_row(
                     claude_percent,
                     fable_percent,
                     fable_text,
-                    claude_accent,
+                    claude_bar_color,
                     track,
                     &claude_value_color,
                 );
@@ -3474,7 +3692,7 @@ fn draw_row(
                     segment_count,
                     claude_percent,
                     claude_text,
-                    claude_accent,
+                    claude_bar_color,
                     track,
                     &claude_value_color,
                 );
@@ -3727,6 +3945,17 @@ fn draw_rounded_rect(hdc: HDC, rect: &RECT, color: &Color, radius: i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{UsageData, UsageSection};
+
+    fn usage_with_session_percent(percentage: f64) -> UsageData {
+        UsageData {
+            session: UsageSection {
+                percentage,
+                resets_at: None,
+            },
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn existing_settings_default_to_taskbar_placement() {
@@ -3797,5 +4026,54 @@ mod tests {
                 "Fable value must remain readable with {active_models} enabled providers"
             );
         }
+    }
+
+    #[test]
+    fn partial_claude_auth_failure_preserves_last_claude_values() {
+        let previous = AppUsageData {
+            claude_code: Some(usage_with_session_percent(61.0)),
+            codex: Some(usage_with_session_percent(10.0)),
+            antigravity: None,
+        };
+        let incoming = AppUsageData {
+            claude_code: None,
+            codex: Some(usage_with_session_percent(42.0)),
+            antigravity: None,
+        };
+
+        let merged = merge_app_usage_data(Some(previous), incoming, true, true, false, true);
+
+        assert_eq!(
+            merged
+                .claude_code
+                .expect("stale Claude data should remain visible")
+                .session
+                .percentage,
+            61.0
+        );
+        assert_eq!(
+            merged
+                .codex
+                .expect("fresh Codex data should replace the old value")
+                .session
+                .percentage,
+            42.0
+        );
+    }
+
+    #[test]
+    fn only_credential_errors_pause_claude_usage() {
+        assert!(should_pause_claude_usage(Some(
+            poller::PollError::TokenExpired
+        )));
+        assert!(should_pause_claude_usage(Some(
+            poller::PollError::AuthRequired
+        )));
+        assert!(should_pause_claude_usage(Some(
+            poller::PollError::NoCredentials
+        )));
+        assert!(!should_pause_claude_usage(Some(
+            poller::PollError::RequestFailed
+        )));
     }
 }

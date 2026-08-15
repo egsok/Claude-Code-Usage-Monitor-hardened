@@ -34,6 +34,14 @@ pub enum PollError {
     RequestFailed,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct PollOutcome {
+    pub data: AppUsageData,
+    pub claude_code_error: Option<PollError>,
+    pub codex_error: Option<PollError>,
+    pub antigravity_error: Option<PollError>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CredentialWatchMode {
     ActiveSource,
@@ -195,7 +203,7 @@ pub fn poll(
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
-) -> Result<AppUsageData, PollError> {
+) -> Result<PollOutcome, PollError> {
     poll_with(
         show_claude_code,
         show_codex,
@@ -213,18 +221,19 @@ fn poll_with(
     mut poll_claude_code: impl FnMut() -> Result<UsageData, PollError>,
     mut poll_codex: impl FnMut() -> Result<UsageData, PollError>,
     mut poll_antigravity: impl FnMut() -> Result<UsageData, PollError>,
-) -> Result<AppUsageData, PollError> {
-    let mut data = AppUsageData::default();
+) -> Result<PollOutcome, PollError> {
+    let mut outcome = PollOutcome::default();
     let mut first_error = None;
     let active_provider_count = show_claude_code as u8 + show_codex as u8 + show_antigravity as u8;
 
     if show_claude_code {
         match poll_claude_code() {
-            Ok(claude_code) => data.claude_code = Some(claude_code),
+            Ok(claude_code) => outcome.data.claude_code = Some(claude_code),
             Err(error) => {
                 if active_provider_count > 1 {
                     diagnose::log(format!("Claude Code usage poll failed: {error:?}"));
                 }
+                outcome.claude_code_error = Some(error);
                 first_error.get_or_insert(error);
             }
         }
@@ -232,11 +241,12 @@ fn poll_with(
 
     if show_codex {
         match poll_codex() {
-            Ok(codex) => data.codex = Some(codex),
+            Ok(codex) => outcome.data.codex = Some(codex),
             Err(error) => {
                 if active_provider_count > 1 {
                     diagnose::log(format!("Codex usage poll failed: {error:?}"));
                 }
+                outcome.codex_error = Some(error);
                 first_error.get_or_insert(error);
             }
         }
@@ -244,20 +254,24 @@ fn poll_with(
 
     if show_antigravity {
         match poll_antigravity() {
-            Ok(antigravity) => data.antigravity = Some(antigravity),
+            Ok(antigravity) => outcome.data.antigravity = Some(antigravity),
             Err(error) => {
                 if active_provider_count > 1 {
                     diagnose::log(format!("Antigravity usage poll failed: {error:?}"));
                 }
+                outcome.antigravity_error = Some(error);
                 first_error.get_or_insert(error);
             }
         }
     }
 
-    if data.claude_code.is_none() && data.codex.is_none() && data.antigravity.is_none() {
+    if outcome.data.claude_code.is_none()
+        && outcome.data.codex.is_none()
+        && outcome.data.antigravity.is_none()
+    {
         Err(first_error.unwrap_or(PollError::RequestFailed))
     } else {
-        Ok(data)
+        Ok(outcome)
     }
 }
 
@@ -1490,7 +1504,7 @@ mod tests {
 
     #[test]
     fn claude_failure_does_not_block_codex_when_both_are_enabled() {
-        let data = poll_with(
+        let outcome = poll_with(
             true,
             true,
             false,
@@ -1500,13 +1514,14 @@ mod tests {
         )
         .expect("codex data should keep the poll successful");
 
-        assert!(data.claude_code.is_none());
-        assert_eq!(data.codex.unwrap().session.percentage, 42.0);
+        assert!(outcome.data.claude_code.is_none());
+        assert_eq!(outcome.data.codex.unwrap().session.percentage, 42.0);
+        assert_eq!(outcome.claude_code_error, Some(PollError::AuthRequired));
     }
 
     #[test]
     fn codex_failure_does_not_block_claude_when_both_are_enabled() {
-        let data = poll_with(
+        let outcome = poll_with(
             true,
             true,
             false,
@@ -1516,8 +1531,9 @@ mod tests {
         )
         .expect("claude data should keep the poll successful");
 
-        assert_eq!(data.claude_code.unwrap().session.percentage, 64.0);
-        assert!(data.codex.is_none());
+        assert_eq!(outcome.data.claude_code.unwrap().session.percentage, 64.0);
+        assert!(outcome.data.codex.is_none());
+        assert_eq!(outcome.codex_error, Some(PollError::RequestFailed));
     }
 
     #[test]
@@ -1537,7 +1553,7 @@ mod tests {
 
     #[test]
     fn antigravity_failure_does_not_block_codex_when_both_are_enabled() {
-        let data = poll_with(
+        let outcome = poll_with(
             false,
             true,
             true,
@@ -1547,8 +1563,9 @@ mod tests {
         )
         .expect("codex data should keep the poll successful");
 
-        assert!(data.antigravity.is_none());
-        assert_eq!(data.codex.unwrap().session.percentage, 42.0);
+        assert!(outcome.data.antigravity.is_none());
+        assert_eq!(outcome.data.codex.unwrap().session.percentage, 42.0);
+        assert_eq!(outcome.antigravity_error, Some(PollError::NoCredentials));
     }
 
     #[test]

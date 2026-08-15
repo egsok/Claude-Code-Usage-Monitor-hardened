@@ -38,8 +38,10 @@ malicious intent. This fork simply adopts a narrower trust model.
 
 ### Hardened Changes
 
-- Never launches Claude Code or Codex CLI commands. If authentication expires,
-  the app reports the problem and waits for the user to log in manually.
+- Never launches Claude Code or Codex CLI commands. If Claude's short-lived
+  access token expires, the app keeps the last known values visible, marks them
+  as paused, and reconnects automatically after Claude Code refreshes its local
+  credentials. Any required login remains a manual user action.
 - Disables executable download and replacement for portable builds.
 - Keeps release checks informational. A dedicated WinGet package will be the
   only supported automatic update path once it is published.
@@ -50,6 +52,17 @@ malicious intent. This fork simply adopts a narrower trust model.
 This remains a local credential-reading utility: it must read provider OAuth
 credentials and send them to the corresponding official usage endpoints. See
 [Privacy And Security](#privacy-and-security) for the exact data flow.
+
+### What's New in v1.5.0
+
+- Added a compact model-specific **Fable** weekly-limit meter.
+- Added taskbar, movable floating-window, and tray-only placement modes.
+- Improved the hardened manual-authentication flow. If Claude's short-lived
+  access token becomes unavailable, the widget now keeps the last successful
+  values visible in a muted paused state instead of replacing them with an
+  ambiguous error. It watches Claude Code's local credential file and resumes
+  automatically after Claude Code refreshes it, without launching Claude Code,
+  running `/login`, or performing authentication on the user's behalf.
 
 ## What You Get
 
@@ -214,7 +227,8 @@ What it does **not** do:
 
 Notes:
 
-- If your Claude Code or Codex token is expired, the app reports an authentication error and waits for you to log in manually
+- If Claude's access token expires, the app keeps the last known Claude values visible with a pause marker and watches the credential file. Open Claude Code and send a message; the monitor reconnects automatically after Claude Code refreshes the token.
+- If your Codex token expires, the app reports an authentication error and waits for you to sign in manually.
 - The app never launches Claude Code or Codex CLI commands in the background
 - If your Antigravity token is expired, open Antigravity and sign in again. The monitor does not write Windows Credential Manager entries itself.
 - Portable installs never download or replace executable files
@@ -265,8 +279,10 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
 
 ### Что изменено
 
-- Приложение никогда не запускает Claude Code или Codex CLI. Если авторизация
-  истекла, нужно самостоятельно войти в соответствующий CLI.
+- Приложение никогда не запускает Claude Code или Codex CLI. Если короткий
+  access token Claude истёк, последние значения остаются на экране с отметкой
+  паузы. После обновления credentials самим Claude Code монитор подключается
+  автоматически. Если потребуется вход, пользователь выполняет его вручную.
 - Portable-версия не скачивает и не заменяет собственный `.exe`.
 - Проверка GitHub Releases только сообщает о новой версии. После публикации
   отдельного пакета автоматические обновления будут выполняться только через
@@ -274,14 +290,29 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
 - Добавлен регрессионный тест, запрещающий возвращение фонового запуска агентов.
 - Репозиторий и будущий WinGet package ID отделены от оригинального проекта.
 
+### Что нового в v1.5.0
+
+- Добавлен компактный индикатор отдельного недельного лимита **Fable**.
+- Добавлены режимы размещения в панели задач, в свободно перемещаемом окне и
+  только в системном трее.
+- Улучшен сценарий ручной авторизации hardened-версии. Если короткий access
+  token Claude временно недоступен, виджет сохраняет последние успешные
+  значения и показывает их в приглушённом состоянии паузы вместо неясной
+  ошибки. Монитор следит за локальным файлом credentials Claude Code и
+  автоматически возобновляет обновление после того, как Claude Code обновит
+  этот файл. Сам монитор не запускает Claude Code, не выполняет `/login` и не
+  авторизуется от имени пользователя.
+
 Утилите по-прежнему требуется читать локальные OAuth-данные провайдеров и
 отправлять их на официальные endpoints статистики. Полный перечень читаемых,
 отправляемых и сохраняемых данных приведён в разделе
 [Privacy And Security](#privacy-and-security).
 
 Для запуска нужны Windows 10/11 и уже авторизованный Claude Code. Поддержка
-Codex и Google Antigravity включается опционально. Если токен истёк, сначала
-войдите в соответствующий CLI вручную, а затем запустите монитор.
+Codex и Google Antigravity включается опционально. Если access token Claude
+истёк, откройте Claude Code и отправьте сообщение: монитор заметит обновление
+credentials и восстановит данные автоматически. Если Claude запросит вход,
+выполните его вручную.
 
 Если Anthropic возвращает отдельный недельный лимит Fable, он показывается в
 строке `7d` рядом с общим недельным лимитом Claude как самостоятельный
