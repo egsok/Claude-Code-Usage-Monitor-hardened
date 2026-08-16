@@ -27,6 +27,7 @@ use crate::poller;
 use crate::theme;
 use crate::tray_icon;
 use crate::updater::{self, InstallChannel, ReleaseDescriptor, UpdateCheckResult};
+use crate::usage_cache;
 
 /// Wrapper to make HWND sendable across threads (safe for PostMessage usage)
 #[derive(Clone, Copy)]
@@ -1395,6 +1396,19 @@ pub fn run() {
         let language_override = settings.language.as_deref().and_then(LanguageId::from_code);
         let language = localization::resolve_language(language_override);
         let install_channel = updater::current_install_channel();
+        let cached_claude = match usage_cache::load() {
+            Ok(cache) => cache,
+            Err(error) => {
+                diagnose::log_error("Claude usage cache ignored", error);
+                None
+            }
+        };
+        let cached_claude_last_success = cached_claude.as_ref().map(|cache| cache.updated_at_unix);
+        let has_cached_claude = cached_claude.is_some();
+        let cached_data = cached_claude.map(|cache| AppUsageData {
+            claude_code: Some(cache.usage),
+            ..Default::default()
+        });
 
         // Create as layered popup (will be reparented into taskbar)
         let title = native_interop::wide_str(language.strings().window_title);
@@ -1470,17 +1484,17 @@ pub fn run() {
                 show_claude_code: settings.show_claude_code,
                 show_codex: settings.show_codex,
                 show_antigravity: settings.show_antigravity,
-                data: None,
+                data: cached_data,
                 poll_interval_ms: settings.poll_interval_ms,
                 retry_count: 0,
                 force_notify_auth_error: false,
                 auth_error_paused_polling: false,
                 auth_watch_mode: poller::CredentialWatchMode::ActiveSource,
                 auth_watch_snapshot: Vec::new(),
-                claude_usage_paused: false,
+                claude_usage_paused: has_cached_claude,
                 claude_auth_watch_snapshot: Vec::new(),
-                claude_last_success_unix: None,
-                last_poll_ok: false,
+                claude_last_success_unix: cached_claude_last_success,
+                last_poll_ok: has_cached_claude,
                 update_status: UpdateStatus::Idle,
                 last_update_check_unix: settings.last_update_check_unix,
                 taskbar_index: settings.taskbar_index,
@@ -1497,6 +1511,9 @@ pub fn run() {
                 drag_start_window_y: 0,
                 widget_visible: settings.widget_visible,
             });
+            if let Some(s) = state.as_mut() {
+                refresh_usage_texts(s);
+            }
         }
 
         // Embed only when taskbar placement is selected.
@@ -1997,6 +2014,8 @@ fn do_poll(send_hwnd: SendHwnd) {
     match poller::poll(show_claude_code, show_codex, show_antigravity) {
         Ok(outcome) => {
             let claude_poll_succeeded = outcome.data.claude_code.is_some();
+            let claude_cache_update = outcome.data.claude_code.clone();
+            let claude_success_unix = claude_poll_succeeded.then(now_unix_secs);
             let claude_usage_paused =
                 show_claude_code && should_pause_claude_usage(outcome.claude_code_error);
             let claude_watch_snapshot = claude_usage_paused.then(|| {
@@ -2046,7 +2065,7 @@ fn do_poll(send_hwnd: SendHwnd) {
                 if claude_poll_succeeded {
                     s.claude_usage_paused = false;
                     s.claude_auth_watch_snapshot.clear();
-                    s.claude_last_success_unix = Some(now_unix_secs());
+                    s.claude_last_success_unix = claude_success_unix;
                 } else if claude_usage_paused {
                     notify_claude_paused = !s.claude_usage_paused || s.force_notify_auth_error;
                     s.claude_usage_paused = true;
@@ -2070,6 +2089,14 @@ fn do_poll(send_hwnd: SendHwnd) {
                 s.auth_watch_snapshot.clear();
             }
             drop(state);
+
+            if let (Some(claude_code), Some(updated_at_unix)) =
+                (claude_cache_update.as_ref(), claude_success_unix)
+            {
+                if let Err(error) = usage_cache::save(claude_code, updated_at_unix) {
+                    diagnose::log_error("Unable to save Claude usage cache", error);
+                }
+            }
 
             unsafe {
                 if claude_usage_paused {

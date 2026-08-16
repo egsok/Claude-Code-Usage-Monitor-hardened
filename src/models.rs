@@ -1,12 +1,14 @@
 use std::time::SystemTime;
 
-#[derive(Clone, Debug, Default)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct UsageSection {
     pub percentage: f64,
     pub resets_at: Option<SystemTime>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct UsageData {
     pub session: UsageSection,
     pub weekly: UsageSection,
@@ -22,7 +24,7 @@ impl UsageData {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ModelUsageLimit {
     pub model_name: String,
     pub usage: UsageSection,
