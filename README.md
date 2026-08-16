@@ -55,15 +55,15 @@ This remains a local credential-reading utility: it must read provider OAuth
 credentials and send them to the corresponding official usage endpoints. See
 [Privacy And Security](#privacy-and-security) for the exact data flow.
 
-### What's New in v1.6.0
+### What's New in v1.6.1
 
-- The last successful Claude usage snapshot, including the **Fable** weekly
-  limit, now survives application and Windows restarts.
-- When Claude's short-lived access token is unavailable at startup, the widget
-  immediately shows the cached values with a pause marker and reconnects after
-  Claude Code refreshes its credentials.
-- The cache contains usage percentages and reset times only. It never stores
-  OAuth tokens or other credentials, and invalid cache files are ignored.
+- Fixed saved taskbar positions being overwritten when Explorer temporarily
+  reports incomplete notification-area geometry during Windows startup.
+- Hardened **Start with Windows** registration: executable paths containing
+  spaces are quoted correctly, missing registry paths are created, and failures
+  are shown instead of being silently ignored.
+- Includes the v1.6.0 persistent Claude/Fable usage cache, which keeps the last
+  successful usage-only snapshot across restarts without storing credentials.
 
 ## What You Get
 
@@ -115,6 +115,16 @@ If you use Claude Code through WSL, that is supported too. The monitor can read 
 The dedicated hardened WinGet package is not published yet. Until it is available,
 build from source or download `claude-code-usage-monitor.exe` from this fork's
 [Releases](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases) page.
+
+For portable use with **Start with Windows**, place the executable in a stable
+folder before enabling the option. Recommended per-user location:
+
+```text
+%LOCALAPPDATA%\Programs\ClaudeCodeUsageMonitor\claude-code-usage-monitor.exe
+```
+
+Do not enable startup from a temporary download or build directory: the Run
+entry intentionally follows the exact executable that enabled it.
 
 Portable builds never update themselves. Once the dedicated package is published,
 WinGet will be the only supported update channel.
@@ -302,16 +312,15 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
 - Добавлен регрессионный тест, запрещающий возвращение фонового запуска агентов.
 - Репозиторий и будущий WinGet package ID отделены от оригинального проекта.
 
-### Что нового в v1.6.0
+### Что нового в v1.6.1
 
-- Последний успешный snapshot Claude, включая отдельный недельный лимит
-  **Fable**, теперь сохраняется между перезапусками приложения и Windows.
-- Если короткий access token Claude недоступен при запуске, виджет сразу
-  показывает сохранённые значения с отметкой паузы и подключается заново после
-  обновления credentials самим Claude Code.
-- Cache содержит только проценты использования и время сброса лимитов. OAuth
-  tokens и другие credentials в него не записываются; повреждённый cache
-  игнорируется.
+- Исправлено стирание сохранённой позиции, когда Explorer во время запуска
+  Windows временно сообщает неполную геометрию области уведомлений.
+- Укреплён **Запуск вместе с Windows**: пути с пробелами корректно заключаются
+  в кавычки, отсутствующие registry paths создаются, а ошибки больше не
+  игнорируются молча.
+- В релиз входит persistent cache из v1.6.0: последний успешный snapshot Claude
+  и Fable переживает перезапуски и не содержит credentials.
 
 Утилите по-прежнему требуется читать локальные OAuth-данные провайдеров и
 отправлять их на официальные endpoints статистики. Полный перечень читаемых,
