@@ -115,28 +115,76 @@ pub fn get_window_rect_safe(hwnd: HWND) -> Option<RECT> {
     }
 }
 
-/// Embed our window as a child of the taskbar
-pub fn embed_in_taskbar(hwnd: HWND, taskbar_hwnd: HWND) {
-    unsafe {
-        // Preserve existing extended style, add tool window + no activate.
-        // Toggling WS_EX_LAYERED resets SetLayeredWindowAttributes state so
-        // UpdateLayeredWindow works again after returning from floating mode.
-        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-        let desired_ex_style = ex_style | WS_EX_TOOLWINDOW.0 as i32 | WS_EX_NOACTIVATE.0 as i32;
-        let _ = SetWindowLongW(
-            hwnd,
-            GWL_EXSTYLE,
-            desired_ex_style & !(WS_EX_LAYERED.0 as i32),
-        );
-        let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, desired_ex_style | WS_EX_LAYERED.0 as i32);
+fn taskbar_window_style(style: u32) -> u32 {
+    (style & !WS_POPUP_STYLE) | WS_CHILD_STYLE | WS_CLIPSIBLINGS_STYLE
+}
 
-        // Change from popup to child
+fn taskbar_extended_style(ex_style: i32) -> i32 {
+    ex_style | WS_EX_TOOLWINDOW.0 as i32 | WS_EX_NOACTIVATE.0 as i32 | WS_EX_LAYERED.0 as i32
+}
+
+unsafe fn apply_extended_style(
+    hwnd: HWND,
+    ex_style: i32,
+    expect_layered: bool,
+    context: &str,
+) -> Result<(), String> {
+    let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style);
+    SetWindowPos(
+        hwnd,
+        HWND::default(),
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED,
+    )
+    .map_err(|error| format!("SetWindowPos {context} failed: {error}"))?;
+
+    let is_layered = GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED.0 as i32 != 0;
+    if is_layered != expect_layered {
+        return Err(format!("WS_EX_LAYERED state is incorrect {context}"));
+    }
+    Ok(())
+}
+
+/// Embed our window as a child of the taskbar.
+pub fn embed_in_taskbar(hwnd: HWND, taskbar_hwnd: HWND) -> Result<(), String> {
+    unsafe {
+        let desired_ex_style = taskbar_extended_style(GetWindowLongW(hwnd, GWL_EXSTYLE));
+        apply_extended_style(hwnd, desired_ex_style, true, "before taskbar reparent")?;
+
+        // SetParent does not update WS_POPUP/WS_CHILD itself. Convert the
+        // style first, then attach the layered window.
         let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
-        let new_style = (style & !WS_POPUP_STYLE) | WS_CHILD_STYLE | WS_CLIPSIBLINGS_STYLE;
+        let new_style = taskbar_window_style(style);
         let _ = SetWindowLongW(hwnd, GWL_STYLE, new_style as i32);
 
-        let _ = SetParent(hwnd, taskbar_hwnd);
+        SetParent(hwnd, taskbar_hwnd)
+            .map_err(|error| format!("SetParent(taskbar) failed: {error}"))?;
+        apply_extended_style(hwnd, desired_ex_style, true, "after taskbar reparent")?;
     }
+
+    Ok(())
+}
+
+/// Leave SetLayeredWindowAttributes mode so UpdateLayeredWindow can render.
+/// The caller must hide the popup first; Windows otherwise keeps the old
+/// attribute-based rendering state even when the style bit is toggled.
+pub fn reset_layered_rendering(hwnd: HWND) -> Result<(), String> {
+    unsafe {
+        let desired_ex_style = taskbar_extended_style(GetWindowLongW(hwnd, GWL_EXSTYLE));
+        let without_layered = desired_ex_style & !(WS_EX_LAYERED.0 as i32);
+        apply_extended_style(hwnd, without_layered, false, "while clearing layered state")?;
+        apply_extended_style(
+            hwnd,
+            desired_ex_style,
+            true,
+            "while restoring layered state",
+        )?;
+    }
+
+    Ok(())
 }
 
 /// Detach an embedded widget and restore it as a top-level popup window.
@@ -236,5 +284,23 @@ impl Color {
 
     pub fn to_colorref(self) -> u32 {
         colorref(self.r, self.g, self.b)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn taskbar_styles_restore_layered_child_rendering() {
+        let style = taskbar_window_style(WS_POPUP_STYLE);
+        assert_eq!(style & WS_POPUP_STYLE, 0);
+        assert_ne!(style & WS_CHILD_STYLE, 0);
+        assert_ne!(style & WS_CLIPSIBLINGS_STYLE, 0);
+
+        let ex_style = taskbar_extended_style(0);
+        assert_ne!(ex_style & WS_EX_LAYERED.0 as i32, 0);
+        assert_ne!(ex_style & WS_EX_TOOLWINDOW.0 as i32, 0);
+        assert_ne!(ex_style & WS_EX_NOACTIVATE.0 as i32, 0);
     }
 }

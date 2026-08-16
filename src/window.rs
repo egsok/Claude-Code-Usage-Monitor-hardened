@@ -565,22 +565,46 @@ fn set_widget_placement(hwnd: HWND, placement: WidgetPlacement) {
     diagnose::log(format!("changing widget placement to {placement:?}"));
     match placement {
         WidgetPlacement::Taskbar => {
-            let taskbar_index = {
+            let (taskbar_index, needs_layered_reset) = {
                 let mut state = lock_state();
                 let Some(s) = state.as_mut() else {
                     return;
                 };
+                let needs_layered_reset = s.widget_placement == WidgetPlacement::Floating;
                 s.widget_placement = WidgetPlacement::Taskbar;
                 s.widget_visible = true;
-                s.taskbar_index
+                (s.taskbar_index, needs_layered_reset)
             };
 
-            if !attach_to_taskbar(hwnd, taskbar_index) {
+            // Floating mode uses SetLayeredWindowAttributes, while embedded
+            // mode uses UpdateLayeredWindow. Windows only resets that mode
+            // switch reliably while the popup is hidden.
+            let reset_ok = if needs_layered_reset {
+                unsafe {
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                }
+                match native_interop::reset_layered_rendering(hwnd) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        diagnose::log_error("unable to reset layered taskbar rendering", error);
+                        false
+                    }
+                }
+            } else {
+                true
+            };
+
+            if !reset_ok || !attach_to_taskbar(hwnd, taskbar_index) {
                 diagnose::log("unable to switch to taskbar placement; keeping floating window");
                 let mut state = lock_state();
                 if let Some(s) = state.as_mut() {
                     s.widget_placement = WidgetPlacement::Floating;
                     s.embedded = false;
+                }
+                drop(state);
+                native_interop::detach_from_taskbar(hwnd);
+                unsafe {
+                    let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
                 }
             }
         }
@@ -657,7 +681,11 @@ fn attach_to_taskbar(hwnd: HWND, requested_index: usize) -> bool {
         native_interop::unhook_win_event(hook);
     }
 
-    native_interop::embed_in_taskbar(hwnd, taskbar.hwnd);
+    if let Err(error) = native_interop::embed_in_taskbar(hwnd, taskbar.hwnd) {
+        diagnose::log_error("unable to embed widget in taskbar", error);
+        native_interop::detach_from_taskbar(hwnd);
+        return false;
+    }
 
     let tray_notify = native_interop::find_child_window(taskbar.hwnd, "TrayNotifyWnd");
     if tray_notify.is_some() {
@@ -1735,7 +1763,7 @@ fn render_layered() {
             AlphaFormat: 1, // AC_SRC_ALPHA
         };
 
-        let _ = UpdateLayeredWindow(
+        if let Err(error) = UpdateLayeredWindow(
             hwnd,
             screen_dc,
             None,
@@ -1745,7 +1773,9 @@ fn render_layered() {
             COLORREF(0),
             Some(&blend),
             ULW_ALPHA,
-        );
+        ) {
+            diagnose::log_error("UpdateLayeredWindow failed", error);
+        }
 
         // Cleanup
         SelectObject(mem_dc, old_bmp);
