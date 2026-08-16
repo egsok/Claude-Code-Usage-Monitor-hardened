@@ -41,7 +41,9 @@ malicious intent. This fork simply adopts a narrower trust model.
 - Never launches Claude Code or Codex CLI commands. If Claude's short-lived
   access token expires, the app keeps the last known values visible, marks them
   as paused, and reconnects automatically after Claude Code refreshes its local
-  credentials. Any required login remains a manual user action.
+  credentials. The last successful Claude usage snapshot persists across app
+  restarts without storing credentials. Any required login remains a manual
+  user action.
 - Disables executable download and replacement for portable builds.
 - Keeps release checks informational. A dedicated WinGet package will be the
   only supported automatic update path once it is published.
@@ -53,16 +55,15 @@ This remains a local credential-reading utility: it must read provider OAuth
 credentials and send them to the corresponding official usage endpoints. See
 [Privacy And Security](#privacy-and-security) for the exact data flow.
 
-### What's New in v1.5.0
+### What's New in v1.6.0
 
-- Added a compact model-specific **Fable** weekly-limit meter.
-- Added taskbar, movable floating-window, and tray-only placement modes.
-- Improved the hardened manual-authentication flow. If Claude's short-lived
-  access token becomes unavailable, the widget now keeps the last successful
-  values visible in a muted paused state instead of replacing them with an
-  ambiguous error. It watches Claude Code's local credential file and resumes
-  automatically after Claude Code refreshes it, without launching Claude Code,
-  running `/login`, or performing authentication on the user's behalf.
+- The last successful Claude usage snapshot, including the **Fable** weekly
+  limit, now survives application and Windows restarts.
+- When Claude's short-lived access token is unavailable at startup, the widget
+  immediately shows the cached values with a pause marker and reconnects after
+  Claude Code refreshes its credentials.
+- The cache contains usage percentages and reset times only. It never stores
+  OAuth tokens or other credentials, and invalid cache files are ignored.
 
 ## What You Get
 
@@ -176,6 +177,12 @@ Settings are saved to:
 %APPDATA%\ClaudeCodeUsageMonitor\settings.json
 ```
 
+The last successful Claude usage snapshot is saved separately to:
+
+```text
+%APPDATA%\ClaudeCodeUsageMonitor\usage-cache.json
+```
+
 ## Account Support
 
 This app works with the same account types that Claude Code itself supports.
@@ -216,6 +223,9 @@ What the app stores locally:
 - Language preference
 - Last update check time
 - Displayed model preferences
+- The last successful Claude usage percentages and reset times, including any
+  model-specific Fable limit returned by Anthropic; no credentials are stored
+  in this cache
 
 What it does **not** do:
 
@@ -282,7 +292,9 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
 - Приложение никогда не запускает Claude Code или Codex CLI. Если короткий
   access token Claude истёк, последние значения остаются на экране с отметкой
   паузы. После обновления credentials самим Claude Code монитор подключается
-  автоматически. Если потребуется вход, пользователь выполняет его вручную.
+  автоматически. Последний успешный snapshot использования сохраняется между
+  перезапусками без credentials. Если потребуется вход, пользователь выполняет
+  его вручную.
 - Portable-версия не скачивает и не заменяет собственный `.exe`.
 - Проверка GitHub Releases только сообщает о новой версии. После публикации
   отдельного пакета автоматические обновления будут выполняться только через
@@ -290,18 +302,16 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
 - Добавлен регрессионный тест, запрещающий возвращение фонового запуска агентов.
 - Репозиторий и будущий WinGet package ID отделены от оригинального проекта.
 
-### Что нового в v1.5.0
+### Что нового в v1.6.0
 
-- Добавлен компактный индикатор отдельного недельного лимита **Fable**.
-- Добавлены режимы размещения в панели задач, в свободно перемещаемом окне и
-  только в системном трее.
-- Улучшен сценарий ручной авторизации hardened-версии. Если короткий access
-  token Claude временно недоступен, виджет сохраняет последние успешные
-  значения и показывает их в приглушённом состоянии паузы вместо неясной
-  ошибки. Монитор следит за локальным файлом credentials Claude Code и
-  автоматически возобновляет обновление после того, как Claude Code обновит
-  этот файл. Сам монитор не запускает Claude Code, не выполняет `/login` и не
-  авторизуется от имени пользователя.
+- Последний успешный snapshot Claude, включая отдельный недельный лимит
+  **Fable**, теперь сохраняется между перезапусками приложения и Windows.
+- Если короткий access token Claude недоступен при запуске, виджет сразу
+  показывает сохранённые значения с отметкой паузы и подключается заново после
+  обновления credentials самим Claude Code.
+- Cache содержит только проценты использования и время сброса лимитов. OAuth
+  tokens и другие credentials в него не записываются; повреждённый cache
+  игнорируется.
 
 Утилите по-прежнему требуется читать локальные OAuth-данные провайдеров и
 отправлять их на официальные endpoints статистики. Полный перечень читаемых,
