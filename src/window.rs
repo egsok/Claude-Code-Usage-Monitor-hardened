@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -728,19 +728,25 @@ fn taskbar_at_point(pt: POINT) -> Option<(usize, native_interop::TaskbarWindow)>
         })
 }
 
-fn tray_left_for_taskbar(taskbar_hwnd: HWND, taskbar_rect: RECT) -> i32 {
-    let mut tray_left = taskbar_rect.right;
-    if let Some(tray_hwnd) = native_interop::find_child_window(taskbar_hwnd, "TrayNotifyWnd") {
-        if let Some(tray_rect) = native_interop::get_window_rect_safe(tray_hwnd) {
-            tray_left = tray_rect.left;
-        }
-    }
-    tray_left
+fn usable_tray_left(taskbar_rect: RECT, reported_tray_left: Option<i32>, widget_width: i32) -> i32 {
+    reported_tray_left
+        .filter(|left| {
+            *left >= taskbar_rect.left.saturating_add(widget_width) && *left <= taskbar_rect.right
+        })
+        .unwrap_or(taskbar_rect.right)
+}
+
+fn tray_left_for_taskbar(taskbar_hwnd: HWND, taskbar_rect: RECT, widget_width: i32) -> i32 {
+    let reported_tray_left = native_interop::find_child_window(taskbar_hwnd, "TrayNotifyWnd")
+        .and_then(native_interop::get_window_rect_safe)
+        .map(|rect| rect.left);
+    usable_tray_left(taskbar_rect, reported_tray_left, widget_width)
 }
 
 fn clamp_offset_for_taskbar(taskbar_hwnd: HWND, taskbar_rect: RECT, offset: i32) -> i32 {
-    let tray_left = tray_left_for_taskbar(taskbar_hwnd, taskbar_rect);
-    let max_offset = (tray_left - taskbar_rect.left - total_widget_width()).max(0);
+    let widget_width = total_widget_width();
+    let tray_left = tray_left_for_taskbar(taskbar_hwnd, taskbar_rect, widget_width);
+    let max_offset = (tray_left - taskbar_rect.left - widget_width).max(0);
     offset.clamp(0, max_offset)
 }
 
@@ -750,9 +756,10 @@ fn offset_for_drop_point(
     pt: POINT,
     drag_start_client_x: i32,
 ) -> i32 {
-    let tray_left = tray_left_for_taskbar(taskbar_hwnd, taskbar_rect);
+    let widget_width = total_widget_width();
+    let tray_left = tray_left_for_taskbar(taskbar_hwnd, taskbar_rect, widget_width);
     let desired_left = pt.x - taskbar_rect.left - drag_start_client_x;
-    let offset = tray_left - taskbar_rect.left - total_widget_width() - desired_left;
+    let offset = tray_left - taskbar_rect.left - widget_width - desired_left;
     clamp_offset_for_taskbar(taskbar_hwnd, taskbar_rect, offset)
 }
 
@@ -1087,6 +1094,17 @@ fn begin_winget_update(hwnd: HWND) {
 const STARTUP_REGISTRY_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const STARTUP_REGISTRY_KEY: &str = "ClaudeCodeUsageMonitor";
 
+fn startup_command(executable: &Path) -> String {
+    format!("\"{}\"", executable.display())
+}
+
+fn startup_value_matches_executable(registry_value: &str, executable: &Path) -> bool {
+    registry_value
+        .trim()
+        .trim_matches('"')
+        .eq_ignore_ascii_case(&executable.to_string_lossy())
+}
+
 /// Returns true only if the startup registry value points to this executable.
 fn is_startup_enabled() -> bool {
     unsafe {
@@ -1142,59 +1160,74 @@ fn is_startup_enabled() -> bool {
             .trim_end_matches('\0')
             .to_string();
 
-        // Get the current executable path
-        let mut exe_buf = [0u16; 260];
-        let len = GetModuleFileNameW(None, &mut exe_buf) as usize;
-        if len == 0 {
+        let current_exe = match std::env::current_exe() {
+            Ok(path) => path,
+            Err(_) => {
+                return false;
+            }
+        };
+        if !startup_value_matches_executable(&reg_value, &current_exe) {
             return false;
         }
-        let current_exe = String::from_utf16_lossy(&exe_buf[..len]);
-
-        // Case-insensitive comparison (Windows paths are case-insensitive)
-        reg_value.eq_ignore_ascii_case(&current_exe)
+        true
     }
 }
 
-fn set_startup_enabled(enable: bool) {
+fn set_startup_enabled(enable: bool) -> Result<(), String> {
     unsafe {
         let path = native_interop::wide_str(STARTUP_REGISTRY_PATH);
 
         let mut hkey = HKEY::default();
-        let result = RegOpenKeyExW(
+        let result = RegCreateKeyExW(
             HKEY_CURRENT_USER,
             PCWSTR::from_raw(path.as_ptr()),
             0,
+            PCWSTR::null(),
+            REG_OPTION_NON_VOLATILE,
             KEY_SET_VALUE,
+            None,
             &mut hkey,
+            None,
         );
         if result.is_err() {
-            return;
+            return Err(format!(
+                "Unable to open the Windows startup registry key: {result:?}"
+            ));
         }
 
         let key_name = native_interop::wide_str(STARTUP_REGISTRY_KEY);
 
-        if enable {
-            let mut exe_buf = [0u16; 260];
-            let len = GetModuleFileNameW(None, &mut exe_buf) as usize;
-            if len > 0 {
-                // Write the wide string including null terminator
-                let byte_len = ((len + 1) * 2) as u32;
-                let _ = RegSetValueExW(
-                    hkey,
-                    PCWSTR::from_raw(key_name.as_ptr()),
-                    0,
-                    REG_SZ,
-                    Some(std::slice::from_raw_parts(
-                        exe_buf.as_ptr() as *const u8,
-                        byte_len as usize,
-                    )),
-                );
-            }
+        let update_result = if enable {
+            let executable = match std::env::current_exe() {
+                Ok(path) => path,
+                Err(error) => {
+                    let _ = RegCloseKey(hkey);
+                    return Err(format!("Unable to locate the running executable: {error}"));
+                }
+            };
+            let command = native_interop::wide_str(&startup_command(&executable));
+            let byte_len = (command.len() * 2) as u32;
+            RegSetValueExW(
+                hkey,
+                PCWSTR::from_raw(key_name.as_ptr()),
+                0,
+                REG_SZ,
+                Some(std::slice::from_raw_parts(
+                    command.as_ptr() as *const u8,
+                    byte_len as usize,
+                )),
+            )
         } else {
-            let _ = RegDeleteValueW(hkey, PCWSTR::from_raw(key_name.as_ptr()));
-        }
+            RegDeleteValueW(hkey, PCWSTR::from_raw(key_name.as_ptr()))
+        };
 
         let _ = RegCloseKey(hkey);
+        if update_result.is_err() && (enable || update_result != ERROR_FILE_NOT_FOUND) {
+            return Err(format!(
+                "Unable to update Windows startup: {update_result:?}"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -2521,35 +2554,13 @@ fn position_at_taskbar() {
     };
 
     let taskbar_height = taskbar_rect.bottom - taskbar_rect.top;
-    let mut tray_left = taskbar_rect.right;
     let anchor_top = taskbar_rect.top;
     let anchor_height = taskbar_height;
 
-    if let Some(tray_hwnd) = native_interop::find_child_window(taskbar_hwnd, "TrayNotifyWnd") {
-        if let Some(tray_rect) = native_interop::get_window_rect_safe(tray_hwnd) {
-            tray_left = tray_rect.left;
-        }
-    }
-
     let widget_width = total_widget_width();
+    let tray_left = tray_left_for_taskbar(taskbar_hwnd, taskbar_rect, widget_width);
     let max_offset = (tray_left - taskbar_rect.left - widget_width).max(0);
     let tray_offset = tray_offset.clamp(0, max_offset);
-    let offset_changed = {
-        let mut state = lock_state();
-        if let Some(s) = state.as_mut() {
-            if s.tray_offset != tray_offset {
-                s.tray_offset = tray_offset;
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    };
-    if offset_changed {
-        save_state_settings();
-    }
 
     let widget_height = sc(WIDGET_HEIGHT);
     let y = compute_anchor_y(anchor_top, anchor_height, widget_height);
@@ -2891,17 +2902,13 @@ unsafe extern "system" fn wnd_proc(
                     // Clamp: don't go past left edge of taskbar
                     if let Some(taskbar_hwnd) = taskbar_hwnd {
                         if let Some(taskbar_rect) = native_interop::get_taskbar_rect(taskbar_hwnd) {
-                            let mut tray_left = taskbar_rect.right;
-                            if let Some(tray_hwnd) =
-                                native_interop::find_child_window(taskbar_hwnd, "TrayNotifyWnd")
-                            {
-                                if let Some(tray_rect) =
-                                    native_interop::get_window_rect_safe(tray_hwnd)
-                                {
-                                    tray_left = tray_rect.left;
-                                }
-                            }
                             let widget_width = total_widget_width_for_state(s);
+                            let reported_tray_left =
+                                native_interop::find_child_window(taskbar_hwnd, "TrayNotifyWnd")
+                                    .and_then(native_interop::get_window_rect_safe)
+                                    .map(|rect| rect.left);
+                            let tray_left =
+                                usable_tray_left(taskbar_rect, reported_tray_left, widget_width);
                             let max_offset = (tray_left - taskbar_rect.left - widget_width).max(0);
                             if new_offset > max_offset {
                                 new_offset = max_offset;
@@ -3096,7 +3103,17 @@ unsafe extern "system" fn wnd_proc(
                     position_widget();
                 }
                 IDM_START_WITH_WINDOWS => {
-                    set_startup_enabled(!is_startup_enabled());
+                    if let Err(error) = set_startup_enabled(!is_startup_enabled()) {
+                        diagnose::log_error("unable to update Windows startup", &error);
+                        let title = {
+                            let state = lock_state();
+                            state
+                                .as_ref()
+                                .map(|s| s.language.strings().settings)
+                                .unwrap_or("Settings")
+                        };
+                        show_error_message(hwnd, title, &error);
+                    }
                 }
                 IDM_FREQ_1MIN | IDM_FREQ_5MIN | IDM_FREQ_15MIN | IDM_FREQ_1HOUR => {
                     let new_interval = match id {
@@ -4069,6 +4086,39 @@ mod tests {
             resolve_floating_position(work_area, 300, 46, Some(-500), Some(5000), 16),
             (0, 994)
         );
+    }
+
+    #[test]
+    fn transient_zero_tray_geometry_falls_back_without_collapsing_taskbar_space() {
+        let taskbar_rect = RECT {
+            left: 0,
+            top: 2088,
+            right: 3840,
+            bottom: 2160,
+        };
+
+        assert_eq!(usable_tray_left(taskbar_rect, Some(0), 440), 3840);
+        assert_eq!(usable_tray_left(taskbar_rect, Some(3440), 440), 3440);
+    }
+
+    #[test]
+    fn startup_command_quotes_paths_and_recognizes_legacy_unquoted_values() {
+        let executable = Path::new(
+            r"C:\Users\Egor Sokolov\AppData\Local\Programs\ClaudeCodeUsageMonitor\claude-code-usage-monitor.exe",
+        );
+
+        assert_eq!(
+            startup_command(executable),
+            format!("\"{}\"", executable.display())
+        );
+        assert!(startup_value_matches_executable(
+            &startup_command(executable),
+            executable
+        ));
+        assert!(startup_value_matches_executable(
+            &executable.display().to_string().to_ascii_uppercase(),
+            executable
+        ));
     }
 
     #[test]
