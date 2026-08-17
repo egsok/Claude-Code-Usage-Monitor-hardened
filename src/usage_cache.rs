@@ -169,6 +169,7 @@ mod tests {
                     resets_at: Some(UNIX_EPOCH + Duration::from_secs(1_800_100_000)),
                 },
             }],
+            scoped_weekly_authoritative: false,
         }
     }
 
@@ -183,6 +184,7 @@ mod tests {
         assert_eq!(restored.updated_at_unix, 1_800_000_001);
         assert_eq!(restored.usage.session.percentage, 13.0);
         assert_eq!(restored.usage.weekly.percentage, 6.0);
+        assert!(!restored.usage.scoped_weekly_authoritative);
         assert_eq!(
             restored
                 .usage

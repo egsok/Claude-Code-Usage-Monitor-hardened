@@ -42,6 +42,25 @@ pub struct PollOutcome {
     pub antigravity_error: Option<PollError>,
 }
 
+impl PollOutcome {
+    pub fn has_transient_provider_failure(&self) -> bool {
+        let request_failed = [
+            self.claude_code_error,
+            self.codex_error,
+            self.antigravity_error,
+        ]
+        .into_iter()
+        .any(|error| error == Some(PollError::RequestFailed));
+        let claude_messages_fallback = self
+            .data
+            .claude_code
+            .as_ref()
+            .is_some_and(|usage| !usage.scoped_weekly_authoritative);
+
+        request_failed || claude_messages_fallback
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CredentialWatchMode {
     ActiveSource,
@@ -475,7 +494,9 @@ fn fetch_usage_with_fallback(token: &str) -> Result<UsageData, PollError> {
 
     // Fall back to Messages API with rate limit headers
     let result = fetch_usage_via_messages(token);
-    if result.is_err() {
+    if result.is_ok() {
+        diagnose::log("Claude usage Messages API fallback active; scoped limits may be stale");
+    } else {
         diagnose::log("usage endpoint and Messages API fallback both failed");
     }
     result
@@ -497,18 +518,33 @@ fn try_usage_endpoint(token: &str) -> Result<Option<UsageData>, PollError> {
             ));
             return Err(PollError::AuthRequired);
         }
-        Err(_) => return Ok(None),
+        Err(error) => {
+            diagnose::log_error(
+                "Claude usage endpoint request failed; trying Messages API fallback",
+                error,
+            );
+            return Ok(None);
+        }
     };
 
     let response: UsageResponse = match resp.into_json() {
         Ok(response) => response,
-        Err(_) => return Ok(None),
+        Err(error) => {
+            diagnose::log_error(
+                "unable to parse Claude usage response; trying Messages API fallback",
+                error,
+            );
+            return Ok(None);
+        }
     };
     Ok(Some(usage_data_from_response(response)))
 }
 
 fn usage_data_from_response(response: UsageResponse) -> UsageData {
-    let mut data = UsageData::default();
+    let mut data = UsageData {
+        scoped_weekly_authoritative: true,
+        ..Default::default()
+    };
 
     if let Some(bucket) = &response.five_hour {
         data.session.percentage = bucket.utilization;
@@ -1500,6 +1536,7 @@ mod tests {
         assert_eq!(fable.percentage, 7.0);
         assert!(fable.resets_at.is_some());
         assert_eq!(data.scoped_weekly.len(), 1);
+        assert!(data.scoped_weekly_authoritative);
     }
 
     #[test]
@@ -1534,6 +1571,43 @@ mod tests {
         assert_eq!(outcome.data.claude_code.unwrap().session.percentage, 64.0);
         assert!(outcome.data.codex.is_none());
         assert_eq!(outcome.codex_error, Some(PollError::RequestFailed));
+    }
+
+    #[test]
+    fn partial_request_failure_requests_a_fast_retry() {
+        let outcome = PollOutcome {
+            data: AppUsageData {
+                claude_code: Some(usage_with_session_percent(64.0)),
+                ..Default::default()
+            },
+            codex_error: Some(PollError::RequestFailed),
+            ..Default::default()
+        };
+
+        assert!(outcome.has_transient_provider_failure());
+    }
+
+    #[test]
+    fn authentication_failure_does_not_enter_network_retry_backoff() {
+        let outcome = PollOutcome {
+            claude_code_error: Some(PollError::AuthRequired),
+            ..Default::default()
+        };
+
+        assert!(!outcome.has_transient_provider_failure());
+    }
+
+    #[test]
+    fn claude_messages_fallback_requests_a_detailed_usage_retry() {
+        let outcome = PollOutcome {
+            data: AppUsageData {
+                claude_code: Some(usage_with_session_percent(15.0)),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(outcome.has_transient_provider_failure());
     }
 
     #[test]

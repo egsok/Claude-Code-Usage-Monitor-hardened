@@ -13,6 +13,8 @@ pub struct UsageData {
     pub session: UsageSection,
     pub weekly: UsageSection,
     pub scoped_weekly: Vec<ModelUsageLimit>,
+    #[serde(skip)]
+    pub scoped_weekly_authoritative: bool,
 }
 
 impl UsageData {
