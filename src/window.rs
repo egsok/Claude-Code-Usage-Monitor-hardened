@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::diagnose;
 use crate::localization::{self, LanguageId, Strings};
-use crate::models::AppUsageData;
+use crate::models::{AppUsageData, UsageData, UsageSection};
 use crate::native_interop::{
     self, Color, TIMER_COUNTDOWN, TIMER_CREDENTIAL_WATCH, TIMER_POLL, TIMER_RESET_POLL,
     TIMER_UPDATE_CHECK, WM_APP_TRAY, WM_APP_USAGE_UPDATED,
@@ -62,10 +62,12 @@ struct AppState {
     weekly_text: String,
     fable_percent: Option<f64>,
     fable_text: String,
+    fable_stale: bool,
     codex_session_percent: f64,
     codex_session_text: String,
     codex_weekly_percent: f64,
     codex_weekly_text: String,
+    codex_stale: bool,
     antigravity_session_percent: f64,
     antigravity_session_text: String,
     antigravity_weekly_percent: f64,
@@ -826,10 +828,11 @@ fn refresh_claude_usage_texts(state: &mut AppState) {
         state.weekly_text = poller::format_line(&claude_code.weekly, strings);
         if let Some(fable) = claude_code.scoped_weekly_for("Fable") {
             state.fable_percent = Some(fable.percentage);
-            state.fable_text = poller::format_compact_line(fable, strings);
+            state.fable_text = format_fable_text(fable, strings, state.fable_stale);
         } else {
             state.fable_percent = None;
             state.fable_text.clear();
+            state.fable_stale = false;
         }
     } else if state.show_claude_code && state.claude_usage_paused {
         state.session_text = "— ↻".to_string();
@@ -842,6 +845,44 @@ fn refresh_claude_usage_texts(state: &mut AppState) {
         state.fable_percent = None;
         state.fable_text.clear();
     }
+}
+
+fn format_fable_text(section: &UsageSection, strings: Strings, stale: bool) -> String {
+    with_stale_marker(poller::format_compact_line(section, strings), stale)
+}
+
+fn with_stale_marker(mut text: String, stale: bool) -> String {
+    if stale {
+        text.push('~');
+    }
+    text
+}
+
+fn preserve_scoped_weekly_from_fallback(
+    previous: Option<&UsageData>,
+    incoming: &mut UsageData,
+    authoritative: bool,
+) -> bool {
+    if authoritative || !incoming.scoped_weekly.is_empty() {
+        return false;
+    }
+
+    let Some(previous) = previous.filter(|usage| !usage.scoped_weekly.is_empty()) else {
+        return false;
+    };
+    let now = SystemTime::now();
+    incoming.scoped_weekly = previous
+        .scoped_weekly
+        .iter()
+        .filter(|limit| {
+            limit
+                .usage
+                .resets_at
+                .is_none_or(|reset| reset.duration_since(now).is_ok())
+        })
+        .cloned()
+        .collect();
+    !incoming.scoped_weekly.is_empty()
 }
 
 fn refresh_usage_texts(state: &mut AppState) {
@@ -857,8 +898,14 @@ fn refresh_usage_texts(state: &mut AppState) {
     };
 
     if let Some(codex) = data.codex.as_ref() {
-        state.codex_session_text = poller::format_line(&codex.session, strings);
-        state.codex_weekly_text = poller::format_line(&codex.weekly, strings);
+        state.codex_session_text = with_stale_marker(
+            poller::format_line(&codex.session, strings),
+            state.codex_stale,
+        );
+        state.codex_weekly_text = with_stale_marker(
+            poller::format_line(&codex.weekly, strings),
+            state.codex_stale,
+        );
     } else if state.show_codex {
         state.codex_session_text = "!".to_string();
         state.codex_weekly_text = "!".to_string();
@@ -1506,10 +1553,12 @@ pub fn run() {
                 weekly_text: "--".to_string(),
                 fable_percent: None,
                 fable_text: String::new(),
+                fable_stale: has_cached_claude,
                 codex_session_percent: 0.0,
                 codex_session_text: "--".to_string(),
                 codex_weekly_percent: 0.0,
                 codex_weekly_text: "--".to_string(),
+                codex_stale: false,
                 antigravity_session_percent: 0.0,
                 antigravity_session_text: "--".to_string(),
                 antigravity_weekly_percent: 0.0,
@@ -2014,6 +2063,7 @@ fn merge_app_usage_data(
     show_codex: bool,
     show_antigravity: bool,
     preserve_claude: bool,
+    preserve_codex: bool,
 ) -> AppUsageData {
     let mut merged = previous.unwrap_or_default();
 
@@ -2025,13 +2075,29 @@ fn merge_app_usage_data(
         merged.claude_code = None;
     }
 
-    merged.codex = if show_codex { incoming.codex } else { None };
+    merged.codex = if show_codex {
+        merge_provider_usage(merged.codex, incoming.codex, preserve_codex)
+    } else {
+        None
+    };
     merged.antigravity = if show_antigravity {
         incoming.antigravity
     } else {
         None
     };
     merged
+}
+
+fn merge_provider_usage(
+    previous: Option<UsageData>,
+    incoming: Option<UsageData>,
+    preserve_previous: bool,
+) -> Option<UsageData> {
+    if incoming.is_some() || !preserve_previous {
+        incoming
+    } else {
+        previous
+    }
 }
 
 fn do_poll(send_hwnd: SendHwnd) {
@@ -2045,30 +2111,41 @@ fn do_poll(send_hwnd: SendHwnd) {
     };
 
     match poller::poll(show_claude_code, show_codex, show_antigravity) {
-        Ok(outcome) => {
+        Ok(mut outcome) => {
+            let partial_transient_failure = outcome.has_transient_provider_failure();
+            let codex_transient_failure =
+                outcome.codex_error == Some(poller::PollError::RequestFailed);
             let claude_poll_succeeded = outcome.data.claude_code.is_some();
-            let claude_cache_update = outcome.data.claude_code.clone();
+            let mut claude_cache_update = None;
             let claude_success_unix = claude_poll_succeeded.then(now_unix_secs);
             let claude_usage_paused =
                 show_claude_code && should_pause_claude_usage(outcome.claude_code_error);
             let claude_watch_snapshot = claude_usage_paused.then(|| {
                 poller::credential_watch_snapshot(poller::CredentialWatchMode::ActiveSource)
             });
-            let reset_data_is_fresh = !poller::app_is_past_reset(&outcome.data);
             let mut notify_claude_paused = false;
             let mut state = lock_state();
             if let Some(s) = state.as_mut() {
-                if let Some(claude_code) = outcome.data.claude_code.as_ref() {
+                if let Some(claude_code) = outcome.data.claude_code.as_mut() {
+                    let authoritative = claude_code.scoped_weekly_authoritative;
+                    let previous = s.data.as_ref().and_then(|data| data.claude_code.as_ref());
+                    s.fable_stale =
+                        preserve_scoped_weekly_from_fallback(previous, claude_code, authoritative);
+                    claude_cache_update = Some(claude_code.clone());
                     s.session_percent = claude_code.session.percentage;
                     s.weekly_percent = claude_code.weekly.percentage;
                 } else if s.show_claude_code && !claude_usage_paused {
                     s.session_percent = 0.0;
                     s.weekly_percent = 0.0;
                 }
+                s.codex_stale = show_codex
+                    && codex_transient_failure
+                    && outcome.data.codex.is_none()
+                    && s.data.as_ref().is_some_and(|data| data.codex.is_some());
                 if let Some(codex) = outcome.data.codex.as_ref() {
                     s.codex_session_percent = codex.session.percentage;
                     s.codex_weekly_percent = codex.weekly.percentage;
-                } else if s.show_codex {
+                } else if s.show_codex && !s.codex_stale {
                     s.codex_session_percent = 0.0;
                     s.codex_weekly_percent = 0.0;
                 }
@@ -2079,7 +2156,8 @@ fn do_poll(send_hwnd: SendHwnd) {
                     s.antigravity_session_percent = 0.0;
                     s.antigravity_weekly_percent = 0.0;
                 }
-                // Stop fast-poll if reset data is now fresh
+                let reset_data_is_fresh = !poller::app_is_past_reset(&outcome.data);
+                // Stop reset-specific fast-poll if reset data is now fresh.
                 if reset_data_is_fresh {
                     unsafe {
                         let _ = KillTimer(hwnd, TIMER_RESET_POLL);
@@ -2093,6 +2171,7 @@ fn do_poll(send_hwnd: SendHwnd) {
                     show_codex,
                     show_antigravity,
                     claude_usage_paused || s.claude_usage_paused,
+                    s.codex_stale,
                 ));
 
                 if claude_poll_succeeded {
@@ -2108,8 +2187,18 @@ fn do_poll(send_hwnd: SendHwnd) {
                 s.last_poll_ok = true;
                 refresh_usage_texts(s);
 
-                // Recovered from errors — restore normal poll interval
-                if s.retry_count > 0 {
+                if partial_transient_failure {
+                    s.retry_count = s.retry_count.saturating_add(1);
+                    let backoff = RETRY_BASE_MS
+                        .saturating_mul(1u32.checked_shl(s.retry_count - 1).unwrap_or(u32::MAX));
+                    let retry_ms = backoff.min(s.poll_interval_ms);
+                    diagnose::log(format!(
+                        "partial provider failure; retry scheduled in {retry_ms}ms"
+                    ));
+                    unsafe {
+                        SetTimer(hwnd, TIMER_POLL, retry_ms, None);
+                    }
+                } else if s.retry_count > 0 {
                     s.retry_count = 0;
                     let interval = s.poll_interval_ms;
                     unsafe {
@@ -4019,7 +4108,8 @@ fn draw_rounded_rect(hdc: HDC, rect: &RECT, color: &Color, radius: i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{UsageData, UsageSection};
+    use crate::localization::LanguageId;
+    use crate::models::{ModelUsageLimit, UsageData, UsageSection};
 
     fn usage_with_session_percent(percentage: f64) -> UsageData {
         UsageData {
@@ -4027,6 +4117,19 @@ mod tests {
                 percentage,
                 resets_at: None,
             },
+            ..Default::default()
+        }
+    }
+
+    fn usage_with_fable(percentage: f64) -> UsageData {
+        UsageData {
+            scoped_weekly: vec![ModelUsageLimit {
+                model_name: "Fable".to_string(),
+                usage: UsageSection {
+                    percentage,
+                    resets_at: None,
+                },
+            }],
             ..Default::default()
         }
     }
@@ -4148,7 +4251,7 @@ mod tests {
             antigravity: None,
         };
 
-        let merged = merge_app_usage_data(Some(previous), incoming, true, true, false, true);
+        let merged = merge_app_usage_data(Some(previous), incoming, true, true, false, true, false);
 
         assert_eq!(
             merged
@@ -4166,6 +4269,68 @@ mod tests {
                 .percentage,
             42.0
         );
+    }
+
+    #[test]
+    fn messages_fallback_preserves_last_fable_as_stale() {
+        let previous = usage_with_fable(22.0);
+        let mut incoming = usage_with_session_percent(15.0);
+
+        let stale = preserve_scoped_weekly_from_fallback(Some(&previous), &mut incoming, false);
+
+        assert!(
+            stale,
+            "preserved fallback data must be visibly marked stale"
+        );
+        assert_eq!(
+            incoming
+                .scoped_weekly_for("Fable")
+                .expect("fallback must retain the last known Fable value")
+                .percentage,
+            22.0
+        );
+    }
+
+    #[test]
+    fn authoritative_usage_response_may_clear_fable() {
+        let previous = usage_with_fable(22.0);
+        let mut incoming = usage_with_session_percent(15.0);
+
+        let stale = preserve_scoped_weekly_from_fallback(Some(&previous), &mut incoming, true);
+
+        assert!(!stale);
+        assert!(incoming.scoped_weekly.is_empty());
+    }
+
+    #[test]
+    fn stale_fable_text_has_a_compact_visual_marker() {
+        let usage = &usage_with_fable(22.0).scoped_weekly[0].usage;
+
+        assert_eq!(
+            format_fable_text(usage, LanguageId::English.strings(), true),
+            "22%~"
+        );
+        assert_eq!(
+            format_fable_text(usage, LanguageId::English.strings(), false),
+            "22%"
+        );
+    }
+
+    #[test]
+    fn transient_codex_failure_preserves_last_values() {
+        let previous = usage_with_session_percent(68.0);
+
+        let merged = merge_provider_usage(Some(previous), None, true)
+            .expect("temporary network errors must keep the last Codex snapshot");
+
+        assert_eq!(merged.session.percentage, 68.0);
+    }
+
+    #[test]
+    fn non_transient_codex_absence_clears_previous_values() {
+        let previous = usage_with_session_percent(68.0);
+
+        assert!(merge_provider_usage(Some(previous), None, false).is_none());
     }
 
     #[test]
