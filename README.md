@@ -55,15 +55,17 @@ This remains a local credential-reading utility: it must read provider OAuth
 credentials and send them to the corresponding official usage endpoints. See
 [Privacy And Security](#privacy-and-security) for the exact data flow.
 
-### What's New in v1.6.1
+### What's New in v1.6.2
 
-- Fixed saved taskbar positions being overwritten when Explorer temporarily
-  reports incomplete notification-area geometry during Windows startup.
-- Hardened **Start with Windows** registration: executable paths containing
-  spaces are quoted correctly, missing registry paths are created, and failures
-  are shown instead of being silently ignored.
-- Includes the v1.6.0 persistent Claude/Fable usage cache, which keeps the last
-  successful usage-only snapshot across restarts without storing credentials.
+- Partial provider failures now use exponential retry backoff starting at
+  30/60/120 seconds instead of waiting for the normal polling interval when
+  another provider still succeeds.
+- When the Claude usage endpoint is temporarily unavailable and the app falls
+  back to the less detailed Messages API, the last known Fable limit remains
+  visible instead of disappearing.
+- Temporary Fable and Codex values are marked with a compact trailing `~` until
+  an authoritative response replaces them.
+- Includes the v1.6.1 taskbar-position and **Start with Windows** fixes.
 
 ## What You Get
 
@@ -86,8 +88,9 @@ credentials and send them to the corresponding official usage endpoints. See
 When Anthropic returns a model-specific weekly Fable quota, the widget shows it
 as a separate compact `F` meter beside the overall `7d` Claude meter. Both
 values remain visible without increasing the Windows taskbar height. The Fable
-meter is hidden automatically for accounts whose usage response does not
-include that quota.
+meter is hidden automatically when an authoritative usage response does not
+include that quota. A trailing `~` means the last known value is being shown
+while a more detailed provider response is retried.
 
 ![Compact Fable weekly-limit indicator in the Windows taskbar](.github/screenshots/fable-taskbar.png)
 
@@ -312,15 +315,16 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
 - Добавлен регрессионный тест, запрещающий возвращение фонового запуска агентов.
 - Репозиторий и будущий WinGet package ID отделены от оригинального проекта.
 
-### Что нового в v1.6.1
+### Что нового в v1.6.2
 
-- Исправлено стирание сохранённой позиции, когда Explorer во время запуска
-  Windows временно сообщает неполную геометрию области уведомлений.
-- Укреплён **Запуск вместе с Windows**: пути с пробелами корректно заключаются
-  в кавычки, отсутствующие registry paths создаются, а ошибки больше не
-  игнорируются молча.
-- В релиз входит persistent cache из v1.6.0: последний успешный snapshot Claude
-  и Fable переживает перезапуски и не содержит credentials.
+- При частичном сетевом сбое отдельного провайдера монитор использует
+  экспоненциальные повторы, начиная с 30/60/120 секунд, а не ждёт обычного
+  интервала обновления.
+- Если основной Claude usage endpoint временно недоступен и используется менее
+  подробный Messages API, последний известный Fable больше не исчезает.
+- Временно сохранённые значения Fable и Codex помечаются компактным символом
+  `~`, пока не придёт полноценный свежий ответ.
+- В релиз входят исправления позиции taskbar и автозапуска из v1.6.1.
 
 Утилите по-прежнему требуется читать локальные OAuth-данные провайдеров и
 отправлять их на официальные endpoints статистики. Полный перечень читаемых,
@@ -336,8 +340,9 @@ credentials и восстановит данные автоматически. �
 Если Anthropic возвращает отдельный недельный лимит Fable, он показывается в
 строке `7d` рядом с общим недельным лимитом Claude как самостоятельный
 компактный индикатор `F`. Оба значения остаются видны без увеличения высоты
-панели задач. Если для аккаунта отдельный лимит Fable не возвращается, индикатор
-автоматически скрывается.
+панели задач. Если полноценный ответ не содержит отдельного лимита Fable,
+индикатор автоматически скрывается. Символ `~` означает, что временно показано
+последнее известное значение, пока приложение повторяет подробный запрос.
 
 ![Компактный индикатор недельного лимита Fable в панели задач](.github/screenshots/fable-taskbar.png)
 
