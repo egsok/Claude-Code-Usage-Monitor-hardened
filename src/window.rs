@@ -60,6 +60,7 @@ struct AppState {
     session_text: String,
     weekly_percent: f64,
     weekly_text: String,
+    claude_stale: bool,
     fable_percent: Option<f64>,
     fable_text: String,
     fable_stale: bool,
@@ -821,11 +822,17 @@ fn refresh_claude_usage_texts(state: &mut AppState) {
     };
 
     if let Some(claude_code) = data.claude_code.as_ref() {
-        state.session_text = poller::format_line(&claude_code.session, strings);
+        state.session_text = with_stale_marker(
+            poller::format_line(&claude_code.session, strings),
+            state.claude_stale,
+        );
         if state.claude_usage_paused {
             state.session_text.push_str(" ↻");
         }
-        state.weekly_text = poller::format_line(&claude_code.weekly, strings);
+        state.weekly_text = with_stale_marker(
+            poller::format_line(&claude_code.weekly, strings),
+            state.claude_stale,
+        );
         if let Some(fable) = claude_code.scoped_weekly_for("Fable") {
             state.fable_percent = Some(fable.percentage);
             state.fable_text = format_fable_text(fable, strings, state.fable_stale);
@@ -922,6 +929,34 @@ fn refresh_usage_texts(state: &mut AppState) {
     } else if state.show_antigravity {
         state.antigravity_session_text = "!".to_string();
         state.antigravity_weekly_text = "!".to_string();
+    }
+}
+
+fn mark_missing_providers_pending(state: &mut AppState) {
+    let claude_missing = state
+        .data
+        .as_ref()
+        .is_none_or(|data| data.claude_code.is_none());
+    if state.show_claude_code && claude_missing {
+        state.session_text = "...".to_string();
+        state.weekly_text = "...".to_string();
+        state.fable_percent = None;
+        state.fable_text.clear();
+    }
+
+    let codex_missing = state.data.as_ref().is_none_or(|data| data.codex.is_none());
+    if state.show_codex && codex_missing {
+        state.codex_session_text = "...".to_string();
+        state.codex_weekly_text = "...".to_string();
+    }
+
+    let antigravity_missing = state
+        .data
+        .as_ref()
+        .is_none_or(|data| data.antigravity.is_none());
+    if state.show_antigravity && antigravity_missing {
+        state.antigravity_session_text = "...".to_string();
+        state.antigravity_weekly_text = "...".to_string();
     }
 }
 
@@ -1476,18 +1511,44 @@ pub fn run() {
         let language_override = settings.language.as_deref().and_then(LanguageId::from_code);
         let language = localization::resolve_language(language_override);
         let install_channel = updater::current_install_channel();
-        let cached_claude = match usage_cache::load() {
+        let cached_usage = match usage_cache::load() {
             Ok(cache) => cache,
             Err(error) => {
-                diagnose::log_error("Claude usage cache ignored", error);
+                diagnose::log_error("Usage cache ignored", error);
                 None
             }
         };
-        let cached_claude_last_success = cached_claude.as_ref().map(|cache| cache.updated_at_unix);
+        let cached_claude_last_success = cached_usage
+            .as_ref()
+            .and_then(|cache| cache.claude.as_ref())
+            .map(|provider| provider.updated_at_unix);
+        let cached_claude = cached_usage
+            .as_ref()
+            .and_then(|cache| cache.claude.as_ref())
+            .map(|provider| provider.usage.clone());
+        let cached_codex = cached_usage
+            .as_ref()
+            .and_then(|cache| cache.codex.as_ref())
+            .map(|provider| provider.usage.clone());
         let has_cached_claude = cached_claude.is_some();
-        let cached_data = cached_claude.map(|cache| AppUsageData {
-            claude_code: Some(cache.usage),
-            ..Default::default()
+        let has_cached_codex = cached_codex.is_some();
+        let has_cached_usage = has_cached_claude || has_cached_codex;
+        let cached_session_percent = cached_claude
+            .as_ref()
+            .map_or(0.0, |usage| usage.session.percentage);
+        let cached_weekly_percent = cached_claude
+            .as_ref()
+            .map_or(0.0, |usage| usage.weekly.percentage);
+        let cached_codex_session_percent = cached_codex
+            .as_ref()
+            .map_or(0.0, |usage| usage.session.percentage);
+        let cached_codex_weekly_percent = cached_codex
+            .as_ref()
+            .map_or(0.0, |usage| usage.weekly.percentage);
+        let cached_data = has_cached_usage.then_some(AppUsageData {
+            claude_code: cached_claude,
+            codex: cached_codex,
+            antigravity: None,
         });
 
         // Create as layered popup (will be reparented into taskbar)
@@ -1547,18 +1608,19 @@ pub fn run() {
                 language_override,
                 language,
                 install_channel,
-                session_percent: 0.0,
+                session_percent: cached_session_percent,
                 session_text: "--".to_string(),
-                weekly_percent: 0.0,
+                weekly_percent: cached_weekly_percent,
                 weekly_text: "--".to_string(),
+                claude_stale: has_cached_claude,
                 fable_percent: None,
                 fable_text: String::new(),
                 fable_stale: has_cached_claude,
-                codex_session_percent: 0.0,
+                codex_session_percent: cached_codex_session_percent,
                 codex_session_text: "--".to_string(),
-                codex_weekly_percent: 0.0,
+                codex_weekly_percent: cached_codex_weekly_percent,
                 codex_weekly_text: "--".to_string(),
-                codex_stale: false,
+                codex_stale: has_cached_codex,
                 antigravity_session_percent: 0.0,
                 antigravity_session_text: "--".to_string(),
                 antigravity_weekly_percent: 0.0,
@@ -1573,10 +1635,10 @@ pub fn run() {
                 auth_error_paused_polling: false,
                 auth_watch_mode: poller::CredentialWatchMode::ActiveSource,
                 auth_watch_snapshot: Vec::new(),
-                claude_usage_paused: has_cached_claude,
+                claude_usage_paused: false,
                 claude_auth_watch_snapshot: Vec::new(),
                 claude_last_success_unix: cached_claude_last_success,
-                last_poll_ok: has_cached_claude,
+                last_poll_ok: has_cached_usage,
                 update_status: UpdateStatus::Idle,
                 last_update_check_unix: settings.last_update_check_unix,
                 taskbar_index: settings.taskbar_index,
@@ -1595,6 +1657,7 @@ pub fn run() {
             });
             if let Some(s) = state.as_mut() {
                 refresh_usage_texts(s);
+                mark_missing_providers_pending(s);
             }
         }
 
@@ -2113,11 +2176,16 @@ fn do_poll(send_hwnd: SendHwnd) {
     match poller::poll(show_claude_code, show_codex, show_antigravity) {
         Ok(mut outcome) => {
             let partial_transient_failure = outcome.has_transient_provider_failure();
+            let claude_transient_failure =
+                outcome.claude_code_error == Some(poller::PollError::RequestFailed);
             let codex_transient_failure =
                 outcome.codex_error == Some(poller::PollError::RequestFailed);
             let claude_poll_succeeded = outcome.data.claude_code.is_some();
+            let codex_poll_succeeded = outcome.data.codex.is_some();
             let mut claude_cache_update = None;
+            let mut codex_cache_update = None;
             let claude_success_unix = claude_poll_succeeded.then(now_unix_secs);
+            let codex_success_unix = codex_poll_succeeded.then(now_unix_secs);
             let claude_usage_paused =
                 show_claude_code && should_pause_claude_usage(outcome.claude_code_error);
             let claude_watch_snapshot = claude_usage_paused.then(|| {
@@ -2129,12 +2197,33 @@ fn do_poll(send_hwnd: SendHwnd) {
                 if let Some(claude_code) = outcome.data.claude_code.as_mut() {
                     let authoritative = claude_code.scoped_weekly_authoritative;
                     let previous = s.data.as_ref().and_then(|data| data.claude_code.as_ref());
+                    s.claude_stale = false;
                     s.fable_stale =
                         preserve_scoped_weekly_from_fallback(previous, claude_code, authoritative);
-                    claude_cache_update = Some(claude_code.clone());
+                    claude_cache_update = claude_success_unix.map(|updated_at_unix| {
+                        usage_cache::CachedProviderUsage {
+                            usage: claude_code.clone(),
+                            updated_at_unix,
+                        }
+                    });
                     s.session_percent = claude_code.session.percentage;
                     s.weekly_percent = claude_code.weekly.percentage;
+                } else if s.show_claude_code
+                    && claude_transient_failure
+                    && s.data
+                        .as_ref()
+                        .is_some_and(|data| data.claude_code.is_some())
+                {
+                    s.claude_stale = true;
+                    s.fable_stale = s
+                        .data
+                        .as_ref()
+                        .and_then(|data| data.claude_code.as_ref())
+                        .is_some_and(|usage| usage.scoped_weekly_for("Fable").is_some());
+                } else if claude_usage_paused {
+                    s.claude_stale = false;
                 } else if s.show_claude_code && !claude_usage_paused {
+                    s.claude_stale = false;
                     s.session_percent = 0.0;
                     s.weekly_percent = 0.0;
                 }
@@ -2143,6 +2232,12 @@ fn do_poll(send_hwnd: SendHwnd) {
                     && outcome.data.codex.is_none()
                     && s.data.as_ref().is_some_and(|data| data.codex.is_some());
                 if let Some(codex) = outcome.data.codex.as_ref() {
+                    codex_cache_update = codex_success_unix.map(|updated_at_unix| {
+                        usage_cache::CachedProviderUsage {
+                            usage: codex.clone(),
+                            updated_at_unix,
+                        }
+                    });
                     s.codex_session_percent = codex.session.percentage;
                     s.codex_weekly_percent = codex.weekly.percentage;
                 } else if s.show_codex && !s.codex_stale {
@@ -2170,7 +2265,7 @@ fn do_poll(send_hwnd: SendHwnd) {
                     show_claude_code,
                     show_codex,
                     show_antigravity,
-                    claude_usage_paused || s.claude_usage_paused,
+                    claude_usage_paused || s.claude_usage_paused || s.claude_stale,
                     s.codex_stale,
                 ));
 
@@ -2183,7 +2278,6 @@ fn do_poll(send_hwnd: SendHwnd) {
                     s.claude_usage_paused = true;
                     s.claude_auth_watch_snapshot = claude_watch_snapshot.unwrap_or_default();
                 }
-
                 s.last_poll_ok = true;
                 refresh_usage_texts(s);
 
@@ -2212,12 +2306,8 @@ fn do_poll(send_hwnd: SendHwnd) {
             }
             drop(state);
 
-            if let (Some(claude_code), Some(updated_at_unix)) =
-                (claude_cache_update.as_ref(), claude_success_unix)
-            {
-                if let Err(error) = usage_cache::save(claude_code, updated_at_unix) {
-                    diagnose::log_error("Unable to save Claude usage cache", error);
-                }
+            if let Err(error) = usage_cache::save_updates(claude_cache_update, codex_cache_update) {
+                diagnose::log_error("Unable to save usage cache", error);
             }
 
             unsafe {
@@ -2276,9 +2366,9 @@ fn do_poll(send_hwnd: SendHwnd) {
                 let mut state = lock_state();
                 let mut should_notify = false;
                 if let Some(s) = state.as_mut() {
-                    s.last_poll_ok = false;
                     match auth_watch {
                         Some((watch_mode, watch_snapshot)) => {
+                            s.last_poll_ok = false;
                             // Only show the balloon on the first failure so it doesn't spam.
                             if s.retry_count == 0 || s.force_notify_auth_error {
                                 should_notify = true;
@@ -2309,15 +2399,39 @@ fn do_poll(send_hwnd: SendHwnd) {
                             s.auth_error_paused_polling = false;
                             s.auth_watch_mode = poller::CredentialWatchMode::ActiveSource;
                             s.auth_watch_snapshot.clear();
-                            s.session_text = "...".to_string();
-                            s.weekly_text = "...".to_string();
-                            if s.fable_percent.is_some() {
-                                s.fable_text = "...".to_string();
+                            s.claude_stale = s.show_claude_code
+                                && s.data
+                                    .as_ref()
+                                    .is_some_and(|data| data.claude_code.is_some());
+                            s.fable_stale = s.claude_stale
+                                && s.data
+                                    .as_ref()
+                                    .and_then(|data| data.claude_code.as_ref())
+                                    .is_some_and(|usage| {
+                                        usage.scoped_weekly_for("Fable").is_some()
+                                    });
+                            s.codex_stale = s.show_codex
+                                && s.data.as_ref().is_some_and(|data| data.codex.is_some());
+                            let has_visible_data = s.claude_stale
+                                || s.codex_stale
+                                || (s.show_antigravity
+                                    && s.data
+                                        .as_ref()
+                                        .is_some_and(|data| data.antigravity.is_some()));
+                            s.last_poll_ok = has_visible_data;
+                            if has_visible_data {
+                                refresh_usage_texts(s);
+                                mark_missing_providers_pending(s);
+                            } else {
+                                s.session_text = "...".to_string();
+                                s.weekly_text = "...".to_string();
+                                s.fable_percent = None;
+                                s.fable_text.clear();
+                                s.codex_session_text = "...".to_string();
+                                s.codex_weekly_text = "...".to_string();
+                                s.antigravity_session_text = "...".to_string();
+                                s.antigravity_weekly_text = "...".to_string();
                             }
-                            s.codex_session_text = "...".to_string();
-                            s.codex_weekly_text = "...".to_string();
-                            s.antigravity_session_text = "...".to_string();
-                            s.antigravity_weekly_text = "...".to_string();
                             s.retry_count = s.retry_count.saturating_add(1);
                             let backoff = RETRY_BASE_MS.saturating_mul(
                                 1u32.checked_shl(s.retry_count - 1).unwrap_or(u32::MAX),
@@ -2407,9 +2521,15 @@ fn schedule_countdown_timer() {
     };
 
     // If a reset time has passed, poll every 5s to pick up fresh data
-    if poller::app_is_past_reset(data) {
+    // only while the provider snapshot itself is fresh. Transient failures use
+    // their own exponential retry and must not be replaced by this fast timer.
+    if !s.claude_stale && !s.codex_stale && poller::app_is_past_reset(data) {
         unsafe {
             SetTimer(hwnd, TIMER_RESET_POLL, 5_000, None);
+        }
+    } else {
+        unsafe {
+            let _ = KillTimer(hwnd, TIMER_RESET_POLL);
         }
     }
 
@@ -3109,13 +3229,7 @@ unsafe extern "system" fn wnd_proc(
                     {
                         let mut state = lock_state();
                         if let Some(s) = state.as_mut() {
-                            s.session_text = "...".to_string();
-                            s.weekly_text = "...".to_string();
-                            if s.fable_percent.is_some() {
-                                s.fable_text = "...".to_string();
-                            }
-                            s.codex_session_text = "...".to_string();
-                            s.codex_weekly_text = "...".to_string();
+                            mark_missing_providers_pending(s);
                             s.force_notify_auth_error = true;
                         }
                     }
@@ -3244,14 +3358,8 @@ unsafe extern "system" fn wnd_proc(
                                 }
                                 _ => {}
                             }
-                            s.session_text = "...".to_string();
-                            s.weekly_text = "...".to_string();
-                            s.fable_percent = None;
-                            s.fable_text.clear();
-                            s.codex_session_text = "...".to_string();
-                            s.codex_weekly_text = "...".to_string();
-                            s.antigravity_session_text = "...".to_string();
-                            s.antigravity_weekly_text = "...".to_string();
+                            refresh_usage_texts(s);
+                            mark_missing_providers_pending(s);
                         }
                     }
                     save_state_settings();
@@ -4313,6 +4421,53 @@ mod tests {
         assert_eq!(
             format_fable_text(usage, LanguageId::English.strings(), false),
             "22%"
+        );
+    }
+
+    #[test]
+    fn cached_provider_text_keeps_its_value_and_is_visibly_stale() {
+        let usage = usage_with_session_percent(68.0);
+        let text = with_stale_marker(
+            poller::format_line(&usage.session, LanguageId::English.strings()),
+            true,
+        );
+
+        assert_eq!(text, "68%~");
+    }
+
+    #[test]
+    fn simultaneous_transient_failures_preserve_both_provider_snapshots() {
+        let previous = AppUsageData {
+            claude_code: Some(usage_with_session_percent(13.0)),
+            codex: Some(usage_with_session_percent(42.0)),
+            antigravity: None,
+        };
+
+        let merged = merge_app_usage_data(
+            Some(previous),
+            AppUsageData::default(),
+            true,
+            true,
+            false,
+            true,
+            true,
+        );
+
+        assert_eq!(
+            merged
+                .claude_code
+                .expect("temporary network errors must keep Claude history")
+                .session
+                .percentage,
+            13.0
+        );
+        assert_eq!(
+            merged
+                .codex
+                .expect("temporary network errors must keep Codex history")
+                .session
+                .percentage,
+            42.0
         );
     }
 

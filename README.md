@@ -55,17 +55,18 @@ This remains a local credential-reading utility: it must read provider OAuth
 credentials and send them to the corresponding official usage endpoints. See
 [Privacy And Security](#privacy-and-security) for the exact data flow.
 
-### What's New in v1.6.2
+### What's New in v1.6.3
 
-- Partial provider failures now use exponential retry backoff starting at
-  30/60/120 seconds instead of waiting for the normal polling interval when
-  another provider still succeeds.
-- When the Claude usage endpoint is temporarily unavailable and the app falls
-  back to the less detailed Messages API, the last known Fable limit remains
-  visible instead of disappearing.
-- Temporary Fable and Codex values are marked with a compact trailing `~` until
-  an authoritative response replaces them.
-- Includes the v1.6.1 taskbar-position and **Start with Windows** fixes.
+- Successful Claude, Fable, and Codex usage snapshots are now persisted
+  separately. No provider credentials or tokens are written to the cache.
+- On startup, the widget restores both the numbers and filled meter segments
+  from the last successful provider responses.
+- During temporary network or VPN failures, the last known values remain
+  visible with a compact trailing `~`; `...` is used only when no snapshot is
+  available yet.
+- Manual refreshes and provider toggles no longer blank known values while a
+  replacement response is pending.
+- Existing v1 Claude-only caches are read and migrated automatically.
 
 ## What You Get
 
@@ -315,16 +316,18 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
 - Добавлен регрессионный тест, запрещающий возвращение фонового запуска агентов.
 - Репозиторий и будущий WinGet package ID отделены от оригинального проекта.
 
-### Что нового в v1.6.2
+### Что нового в v1.6.3
 
-- При частичном сетевом сбое отдельного провайдера монитор использует
-  экспоненциальные повторы, начиная с 30/60/120 секунд, а не ждёт обычного
-  интервала обновления.
-- Если основной Claude usage endpoint временно недоступен и используется менее
-  подробный Messages API, последний известный Fable больше не исчезает.
-- Временно сохранённые значения Fable и Codex помечаются компактным символом
-  `~`, пока не придёт полноценный свежий ответ.
-- В релиз входят исправления позиции taskbar и автозапуска из v1.6.1.
+- Успешные снимки статистики Claude, Fable и Codex теперь сохраняются раздельно.
+  Credentials и токены провайдеров в кэш не записываются.
+- После запуска виджет восстанавливает не только цифры, но и заполнение
+  индикаторов из последних успешных ответов каждого провайдера.
+- При временных сетевых сбоях или проблемах VPN последние значения остаются
+  видимыми с компактным символом `~`; `...` используется, только если снимка
+  ещё нет.
+- Ручное обновление и переключение провайдеров больше не скрывают известные
+  значения в ожидании нового ответа.
+- Старый Claude-only кэш v1 читается и автоматически переводится в новый формат.
 
 Утилите по-прежнему требуется читать локальные OAuth-данные провайдеров и
 отправлять их на официальные endpoints статистики. Полный перечень читаемых,

@@ -29,7 +29,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: target/release/claude-code-usage-monitor.exe
-          generate_release_notes: true
+          body_path: .github/release-notes/${{ github.ref_name }}.md
 
   winget:
     needs: build
