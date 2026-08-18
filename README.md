@@ -50,23 +50,20 @@ malicious intent. This fork simply adopts a narrower trust model.
 - Includes a regression test that guards against reintroducing background agent
   CLI launches.
 - Uses a repository and future package identity separate from the upstream app.
+- Shows reset countdowns of 24 hours or more in tenths of a day, rounded down
+  (`47h 59m` becomes `1.9d`). Whole-day truncation could otherwise hide almost
+  24 hours and misleadingly show `1d` when nearly two days remained.
 
 This remains a local credential-reading utility: it must read provider OAuth
 credentials and send them to the corresponding official usage endpoints. See
 [Privacy And Security](#privacy-and-security) for the exact data flow.
 
-### What's New in v1.6.3
+### What's New in v1.6.4
 
-- Successful Claude, Fable, and Codex usage snapshots are now persisted
-  separately. No provider credentials or tokens are written to the cache.
-- On startup, the widget restores both the numbers and filled meter segments
-  from the last successful provider responses.
-- During temporary network or VPN failures, the last known values remain
-  visible with a compact trailing `~`; `...` is used only when no snapshot is
-  available yet.
-- Manual refreshes and provider toggles no longer blank known values while a
-  replacement response is pending.
-- Existing v1 Claude-only caches are read and migrated automatically.
+- Reset countdowns from 24 hours upward now show tenths of a day instead of
+  truncating to whole days. For example, `47h 59m` is shown as `1.9d`, not `1d`.
+- The compact provider layout reserves more room for countdown text, so values
+  such as `54%·14h` and decimal-day countdowns stay clear of the next provider.
 
 ## What You Get
 
@@ -315,19 +312,16 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
   WinGet.
 - Добавлен регрессионный тест, запрещающий возвращение фонового запуска агентов.
 - Репозиторий и будущий WinGet package ID отделены от оригинального проекта.
+- Таймеры сброса от 24 часов показывают дни с десятыми долями и округлением вниз
+  (`47ч 59м` отображается как `1.9д`). При выводе только целых дней терялось до
+  23 часов 59 минут, поэтому почти двое суток могли выглядеть как `1д`.
 
-### Что нового в v1.6.3
+### Что нового в v1.6.4
 
-- Успешные снимки статистики Claude, Fable и Codex теперь сохраняются раздельно.
-  Credentials и токены провайдеров в кэш не записываются.
-- После запуска виджет восстанавливает не только цифры, но и заполнение
-  индикаторов из последних успешных ответов каждого провайдера.
-- При временных сетевых сбоях или проблемах VPN последние значения остаются
-  видимыми с компактным символом `~`; `...` используется, только если снимка
-  ещё нет.
-- Ручное обновление и переключение провайдеров больше не скрывают известные
-  значения в ожидании нового ответа.
-- Старый Claude-only кэш v1 читается и автоматически переводится в новый формат.
+- Таймеры от 24 часов теперь показывают десятые доли дня вместо целых дней:
+  например, `47ч 59м` отображается как `1.9д`, а не как `1д`.
+- В компактной раскладке увеличено место под таймер: значения вроде `54%·14ч`
+  и дробного количества дней больше не заходят под следующий индикатор.
 
 Утилите по-прежнему требуется читать локальные OAuth-данные провайдеров и
 отправлять их на официальные endpoints статистики. Полный перечень читаемых,

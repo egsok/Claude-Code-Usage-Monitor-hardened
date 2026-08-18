@@ -1415,10 +1415,15 @@ pub fn time_until_display_change(resets_at: Option<SystemTime>) -> Option<Durati
 fn format_countdown_from_secs(total_secs: u64, strings: Strings) -> String {
     let total_mins = total_secs / 60;
     let total_hours = total_secs / 3600;
-    let total_days = total_secs / 86400;
+    let total_day_tenths = total_secs / 8_640;
 
-    if total_days >= 1 {
-        format!("{total_days}{}", strings.day_suffix)
+    if total_hours >= 24 {
+        format!(
+            "{}.{:01}{}",
+            total_day_tenths / 10,
+            total_day_tenths % 10,
+            strings.day_suffix
+        )
     } else if total_hours >= 1 {
         format!("{total_hours}{}", strings.hour_suffix)
     } else if total_mins >= 1 {
@@ -1431,10 +1436,9 @@ fn format_countdown_from_secs(total_secs: u64, strings: Strings) -> String {
 fn time_until_display_change_from_secs(total_secs: u64) -> Duration {
     let total_mins = total_secs / 60;
     let total_hours = total_secs / 3600;
-    let total_days = total_secs / 86400;
 
-    let current_bucket_start = if total_days >= 1 {
-        total_days * 86400
+    let current_bucket_start = if total_hours >= 24 {
+        (total_secs / 8_640) * 8_640
     } else if total_hours >= 1 {
         total_hours * 3600
     } else if total_mins >= 1 {
@@ -1464,6 +1468,34 @@ pub fn app_is_past_reset(data: &AppUsageData) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::localization::LanguageId;
+
+    #[test]
+    fn multi_day_countdown_preserves_tenths_instead_of_hiding_nearly_a_day() {
+        let strings = LanguageId::English.strings();
+
+        assert_eq!(format_countdown_from_secs(48 * 3_600, strings), "2.0d");
+        assert_eq!(
+            format_countdown_from_secs(47 * 3_600 + 59 * 60, strings),
+            "1.9d"
+        );
+        assert_eq!(
+            format_countdown_from_secs(23 * 3_600 + 59 * 60, strings),
+            "23h"
+        );
+    }
+
+    #[test]
+    fn multi_day_countdown_refreshes_at_each_tenth_of_a_day() {
+        assert_eq!(
+            time_until_display_change_from_secs(47 * 3_600),
+            Duration::from_secs(5_041)
+        );
+        assert_eq!(
+            time_until_display_change_from_secs(24 * 3_600),
+            Duration::from_secs(1)
+        );
+    }
 
     #[test]
     fn hardened_build_never_invokes_agent_clis() {

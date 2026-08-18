@@ -1329,7 +1329,7 @@ const DIVIDER_RIGHT_MARGIN: i32 = 6;
 const LABEL_WIDTH: i32 = 18;
 const LABEL_RIGHT_MARGIN: i32 = 10;
 const BAR_RIGHT_MARGIN: i32 = 4;
-const TEXT_WIDTH: i32 = 62;
+const TEXT_WIDTH: i32 = 74;
 const MODEL_RIGHT_MARGIN: i32 = 3;
 const RIGHT_MARGIN: i32 = 1;
 const WIDGET_HEIGHT: i32 = 46;
@@ -4340,7 +4340,7 @@ mod tests {
                 scoped_weekly_fable_text_width(model_usage_width(row_segments), active_models);
 
             assert!(
-                text_width >= sc(44),
+                text_width >= sc(56),
                 "Fable value must remain readable with {active_models} enabled providers"
             );
         }
