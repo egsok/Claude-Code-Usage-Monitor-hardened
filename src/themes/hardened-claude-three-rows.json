@@ -19,7 +19,7 @@
         "offset_x": 0,
         "offset_y": 0
       },
-      "width": "42 + providers.count * (ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82) + max(0, providers.count - 1) * 3 + (providers.opencode.enabled + providers.cursor.enabled) * 28 - providers.codex.enabled * (82 - (if(codex.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))))",
+      "width": "42 + providers.count * (ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82) + max(0, providers.count - 1) * 2 + (providers.opencode.enabled + providers.cursor.enabled) * 28 - providers.codex.enabled * (82 - (if(codex.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74)))) - providers.claude.enabled * (82 - (if(claude.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))))",
       "height": "46",
       "mouse_events": {
         "right_click": "show_context_menu(\"classic-v1\")"
@@ -418,14 +418,14 @@
           "width": "canvas.width - 42",
           "height": "46",
           "layout": "row",
-          "gap": "3"
+          "gap": "2"
         },
         {
           "id": "claude-provider",
           "name": "Claude Code provider",
           "render": "providers.claude.enabled",
           "parent": "provider-row",
-          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + if(claude.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
           "height": "46"
         },
         {
@@ -459,7 +459,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
-          "width": "82",
+          "width": "if(claude.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
           "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
           "content": {
             "type": "text",
@@ -506,7 +506,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
-          "width": "82",
+          "width": "if(claude.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
           "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
           "content": {
             "type": "text",
@@ -553,7 +553,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
-          "width": "82",
+          "width": "if(claude.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
           "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
           "content": {
             "type": "text",
@@ -600,7 +600,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
-          "width": "82",
+          "width": "if(claude.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
           "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
           "content": {
             "type": "text",
@@ -1237,7 +1237,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
-          "width": "82",
+          "width": "if(claude.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
           "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
           "content": {
             "type": "text",
@@ -1287,7 +1287,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
-          "width": "82",
+          "width": "if(claude.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
           "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
           "content": {
             "type": "text",
@@ -1638,7 +1638,7 @@
           "render": "(system.dark) * (providers.claude.enabled && claude.model.fable.available)",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "31",
-          "width": "82",
+          "width": "if(claude.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
           "height": "12",
           "content": {
             "type": "text",
@@ -1686,7 +1686,7 @@
           "render": "(1 - system.dark) * (providers.claude.enabled && claude.model.fable.available)",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "31",
-          "width": "82",
+          "width": "if(claude.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
           "height": "12",
           "content": {
             "type": "text",

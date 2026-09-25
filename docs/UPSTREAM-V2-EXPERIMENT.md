@@ -135,11 +135,14 @@ It is a standalone theme file: import it through Theme Studio on a fresh profile
 The local experimental profile already uses it. This change needs no executable
 replacement and does not modify the built-in Classic theme or its user copies.
 
-With Claude, Codex and Fable present, the taskbar surface is 311 × 46 logical pixels,
+With Claude, Codex and Fable present, the taskbar surface is 296 × 46 logical pixels,
 versus 439 × 46 in the original experiment and 325 × 46 in the first compact preview.
-Claude has 5h, 7d and F rows; Codex occupies the first two. The Codex text field is
+Claude has 5h, 7d and F rows; Codex occupies the first two. Both text fields use
 68 pixels in the three-row layout, retaining room for 100%, reset time and `~`.
-Without the third row it uses 74 pixels; the original credits field keeps 82.
+Without the third row they use 74 pixels; credit balances keep the original 82.
+The final spacing pass reduced Claude's unused text reserve and the provider gap
+from 3 to 2 pixels, saving another 15 pixels from the previously applied 311-wide
+theme without changing the font, bars or row height.
 
 Native renderer checks covered 100%, 125%, 150%, 175% and 200% scaling, English and
 Russian reset suffixes, long percentages/stale markers, row overlap and the case
@@ -151,3 +154,9 @@ under `theme-variants`, rather than adding a permanent test for a theme-only edi
 Only the experiment was restarted to apply the theme and reopen Theme Studio.
 Both selected monitor copies were created; monitor settings and positions matched
 the pre-change snapshot, and the v1 settings hash remained unchanged.
+
+The final spacing pass passed two focused native renderer/geometry checks,
+including text fitting at 100–200% scaling. The collision policy is unchanged:
+this upstream version has no setting to disable automatic taskbar ejection;
+exposing one requires a code change. A narrower theme alone does not guarantee
+that a saved position is free of taskbar buttons.
