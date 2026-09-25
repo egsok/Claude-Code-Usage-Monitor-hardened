@@ -1,9 +1,8 @@
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use super::{build_agent, unix_to_system_time, PollError};
 use crate::app_settings;
@@ -11,7 +10,6 @@ use crate::diagnose;
 use crate::models::{CodexCreditsState, CreditsSection, UsageData, UsageSection};
 
 const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
-const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Deserialize)]
 struct CodexAuthFile {
@@ -84,23 +82,7 @@ pub(super) fn poll_account(path: &Path) -> Result<UsageData, PollError> {
         }
     };
 
-    match fetch_codex_usage_at(&creds.access_token, creds.account_id.as_deref(), Some(path)) {
-        Ok(data) => Ok(data),
-        Err(PollError::AuthRequired) => {
-            if path.file_name().is_some_and(|name| name == "auth.json") {
-                if let Some(directory) = path.parent() {
-                    cli_refresh_codex_token(directory);
-                }
-            }
-            let refreshed = read_codex_credentials_at(path).ok_or(PollError::TokenExpired)?;
-            fetch_codex_usage_at(
-                &refreshed.access_token,
-                refreshed.account_id.as_deref(),
-                Some(path),
-            )
-        }
-        Err(error) => Err(error),
-    }
+    fetch_codex_usage_at(&creds.access_token, creds.account_id.as_deref(), Some(path))
 }
 
 fn fetch_codex_usage_at(
@@ -190,7 +172,7 @@ fn codex_usage_from_response_at(
                 .and_then(|bytes| serde_json::from_slice(&bytes).ok())
                 .or_else(|| {
                     app_settings::load_codex_credits().filter(|state| {
-                        account_id.is_some() && state.account_id.as_deref() == account_id
+                        account_id.is_some() && state.account_key == credit_account_key(account_id)
                     })
                 }),
             None => app_settings::load_codex_credits(),
@@ -209,14 +191,23 @@ fn codex_usage_from_response_at(
     Some(data)
 }
 
+fn credit_account_key(account_id: Option<&str>) -> Option<String> {
+    account_id.filter(|id| !id.is_empty()).map(|id| {
+        let mut digest = Sha256::new();
+        digest.update(b"ccum:codex:account:v1:");
+        digest.update(id.as_bytes());
+        digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    })
+}
+
 fn credit_state_file_name(path: &Path, account_id: Option<&str>) -> String {
-    format!(
-        "codex-credits-{}.json",
-        crate::accounts::fingerprint(&format!(
-            "{}|{account_id:?}",
-            crate::accounts::source_key(path)
-        ))
-    )
+    let key = credit_account_key(account_id).unwrap_or_else(|| "unknown".into());
+    let source = crate::accounts::fingerprint(&crate::accounts::source_key(path));
+    format!("codex-credits-{source}-{key}.json")
 }
 
 /// Tracks the balance across polls and turns it into a gauge.
@@ -238,7 +229,7 @@ fn codex_credits(
         .filter(|balance| balance.is_finite() && *balance >= 0.0)
         .unwrap_or_default();
 
-    let previous = previous.filter(|state| state.account_id.as_deref() == account_id);
+    let previous = previous.filter(|state| state.account_key == credit_account_key(account_id));
     let baseline = match previous {
         // A rise can only come from a top-up. Seed from the first balance we
         // see, which reads as untouched until the next top-up corrects it.
@@ -246,7 +237,7 @@ fn codex_credits(
         _ => balance,
     };
     let state = CodexCreditsState {
-        account_id: account_id.map(str::to_owned),
+        account_key: credit_account_key(account_id),
         balance,
         baseline,
     };
@@ -344,105 +335,42 @@ fn read_codex_credentials_at(auth_path: &Path) -> Option<CodexTokenData> {
         .filter(|tokens| !tokens.access_token.trim().is_empty())
 }
 
-fn cli_refresh_codex_token(directory: &Path) {
-    let codex_path = resolve_windows_codex_path();
-    let is_cmd = codex_path.to_lowercase().ends_with(".cmd");
-    let is_ps1 = codex_path.to_lowercase().ends_with(".ps1");
-    diagnose::log(format!(
-        "attempting Windows Codex token refresh via {codex_path}"
-    ));
-
-    let args: &[&str] = &["exec", "."];
-    let mut command = if is_cmd {
-        let mut command = Command::new("cmd.exe");
-        command.arg("/c").arg(&codex_path).args(args);
-        command
-    } else if is_ps1 {
-        let mut command = Command::new("powershell.exe");
-        command
-            .arg("-NoProfile")
-            .arg("-ExecutionPolicy")
-            .arg("Bypass")
-            .arg("-File")
-            .arg(&codex_path)
-            .args(args);
-        command
-    } else {
-        let mut command = Command::new(&codex_path);
-        command.args(args);
-        command
-    };
-    command
-        .env("CODEX_HOME", directory)
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            diagnose::log_error("unable to spawn Windows Codex token refresh", error);
-            return;
-        }
-    };
-    wait_for_refresh(&mut child);
-}
-
-fn resolve_windows_codex_path() -> String {
-    for name in ["codex.cmd", "codex.ps1", "codex.exe", "codex"] {
-        if Command::new(name)
-            .arg("--version")
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok()
-        {
-            return name.to_string();
-        }
-    }
-
-    for name in ["codex.cmd", "codex.ps1", "codex.exe", "codex"] {
-        if let Ok(output) = Command::new("where.exe")
-            .arg(name)
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-        {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if let Some(path) = stdout
-                    .lines()
-                    .next()
-                    .map(str::trim)
-                    .filter(|path| !path.is_empty())
-                {
-                    return path.to_string();
-                }
-            }
-        }
-    }
-    "codex.cmd".to_string()
-}
-
-fn wait_for_refresh(child: &mut std::process::Child) {
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if start.elapsed() > Duration::from_secs(30) => {
-                let _ = child.kill();
-                break;
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(500)),
-            Err(_) => break,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persisted_credit_history_contains_only_the_account_hash() {
+        let account = "provider-account-private-identity";
+        let (state, _) = codex_credits(None, &credits("1000", true), true, Some(account));
+        let path = app_settings::app_data_directory().join(credit_state_file_name(
+            Path::new("C:/profiles/work/auth.json"),
+            Some(account),
+        ));
+        app_settings::write_json_atomic(&path, &state).unwrap();
+        let json = std::fs::read_to_string(&path).unwrap();
+        assert!(!json.contains(account));
+        assert!(!json.contains("account_id"));
+        assert!(!path.to_string_lossy().contains(account));
+        assert_eq!(state.account_key.as_ref().unwrap().len(), 64);
+        let loaded = serde_json::from_str(&json).unwrap();
+        let (next, gauge) = codex_credits(Some(loaded), &credits("500", true), true, Some(account));
+        assert_eq!(
+            next.baseline, 1000.0,
+            "a token refresh does not reset the same account's credit history"
+        );
+        assert_eq!(gauge.unwrap().percentage, 50.0);
+    }
+
+    #[test]
+    fn account_hash_uses_sha256_and_ignores_empty_identity() {
+        assert_eq!(credit_account_key(None), None);
+        assert_eq!(credit_account_key(Some("")), None);
+        assert_eq!(
+            credit_account_key(Some("example")).as_deref(),
+            Some("ac4fde55071d605b0fa46e5c51de94e21d011ac29111aacbbe46e8297c2b7beb")
+        );
+    }
 
     #[test]
     fn credit_history_is_scoped_to_source_and_account() {
@@ -499,7 +427,7 @@ mod tests {
     #[test]
     fn spending_against_a_baseline_fills_the_gauge() {
         let previous = CodexCreditsState {
-            account_id: None,
+            account_key: None,
             balance: 2500.0,
             baseline: 2500.0,
         };
@@ -515,7 +443,7 @@ mod tests {
     #[test]
     fn a_rise_in_the_balance_is_a_reload_and_rebaselines() {
         let previous = CodexCreditsState {
-            account_id: None,
+            account_key: None,
             balance: 100.0,
             baseline: 2500.0,
         };
@@ -530,7 +458,7 @@ mod tests {
     #[test]
     fn changing_accounts_reseeds_the_credit_baseline() {
         let previous = CodexCreditsState {
-            account_id: Some("old-account".into()),
+            account_key: credit_account_key(Some("old-account")),
             balance: 100.0,
             baseline: 2500.0,
         };
@@ -541,7 +469,7 @@ mod tests {
             Some("new-account"),
         );
 
-        assert_eq!(state.account_id.as_deref(), Some("new-account"));
+        assert_eq!(state.account_key, credit_account_key(Some("new-account")));
         assert_eq!(state.baseline, 50.0);
         assert!(
             section.is_none(),
@@ -552,7 +480,7 @@ mod tests {
     #[test]
     fn the_gauge_hides_while_an_allowance_remains() {
         let previous = CodexCreditsState {
-            account_id: None,
+            account_key: None,
             balance: 2000.0,
             baseline: 2500.0,
         };
@@ -580,7 +508,7 @@ mod tests {
     #[test]
     fn a_reached_overage_limit_pins_the_gauge_full() {
         let previous = CodexCreditsState {
-            account_id: None,
+            account_key: None,
             balance: 500.0,
             baseline: 1000.0,
         };

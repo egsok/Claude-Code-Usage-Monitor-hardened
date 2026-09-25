@@ -316,6 +316,7 @@ fn studio_preview_uses_cached_poll_failure_state_instead_of_stale_values() {
             monthly: None,
             credits: None,
             stale: false,
+            ..Default::default()
         },
     )]));
     app.usage_poll_ok = false;
@@ -440,7 +441,7 @@ fn diagnostics_page_has_logging_controls_and_menu_version() {
     }
     output.textures_delta.clear();
     assert!(text.find("Assets").unwrap() < text.find("Diagnostics").unwrap());
-    assert!(text.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))));
+    assert!(text.contains(&studio_core::version_label()));
     assert!(text.contains("Logging"));
     assert!(text.contains("Write diagnostic events to"));
     assert!(text.contains("Disabled"));
@@ -494,6 +495,32 @@ fn local_frequency_edits_survive_sync_before_save() {
     app.sync_poll_interval(POLL_15_MIN);
     assert_eq!(app.settings.poll_interval_ms, POLL_15_MIN);
     assert_eq!(app.poll_interval_editor_generation, generation + 1);
+}
+
+#[test]
+fn studio_field_edits_preserve_newer_monitor_settings() {
+    let previous = SettingsFile::default();
+    app_settings::update_settings(|settings| {
+        settings.poll_interval_ms = POLL_5_MIN;
+        settings.last_update_check_unix = Some(1234);
+        settings.placement_override = None;
+        settings.set_provider_enabled(crate::providers::ProviderId::Codex, true);
+    })
+    .unwrap();
+    let mut edited = previous.clone();
+    edited.usage_countdown = true;
+    let persisted = studio_core::save_edited_settings(&previous, &edited).unwrap();
+    assert_eq!(persisted.poll_interval_ms, POLL_5_MIN);
+    assert_eq!(persisted.last_update_check_unix, Some(1234));
+    assert!(persisted.placement_override.is_none());
+    assert!(persisted.provider_enabled(crate::providers::ProviderId::Codex));
+    assert!(persisted.usage_countdown);
+
+    // An explicit Studio interval edit wins, while unrelated monitor fields survive.
+    edited.poll_interval_ms = POLL_1_MIN * 2;
+    let persisted = studio_core::save_edited_settings(&previous, &edited).unwrap();
+    assert_eq!(persisted.poll_interval_ms, POLL_1_MIN * 2);
+    assert_eq!(persisted.last_update_check_unix, Some(1234));
 }
 
 #[test]
@@ -567,6 +594,52 @@ fn unchanged_usage_cache_does_not_invalidate_the_preview() {
     app.preview_dirty = false;
     assert!(!app.update_usage_cache(cache));
     assert!(!app.preview_dirty);
+}
+
+#[test]
+fn imported_stale_snapshot_remains_visible_before_a_successful_poll() {
+    use crate::models::{AccountUsage, UsageData, UsageSection};
+    use crate::providers::ProviderId;
+
+    let mut app = app_with_surfaces(vec![root("main")]);
+    let usage = UsageData {
+        stale: true,
+        session: UsageSection {
+            available: true,
+            percentage: 7.0,
+            resets_at: None,
+        },
+        ..Default::default()
+    };
+    let mut data = AppUsageData::default();
+    data.accounts.push(AccountUsage {
+        provider: ProviderId::Codex,
+        profile: Default::default(),
+        source_signature: "imported-source".into(),
+        source_path: None,
+        usage: Some(usage),
+        error: None,
+        selected: true,
+    });
+    let cache = UsageCache {
+        data,
+        poll_ok: false,
+        ..Default::default()
+    };
+    assert!(app.update_usage_cache(cache));
+    let context = DataContext::from_usage_with_runtime(
+        app.usage.as_ref(),
+        &Canvas::default(),
+        app.theme_runtime(),
+    );
+    // Classic's numeric objects require data.poll_ok; the stale marker must
+    // still tell the user that this is a saved reading, not a fresh response.
+    assert_eq!(context.get("data.poll_ok"), Some(1.0));
+    assert_eq!(context.get("data.has_error"), Some(0.0));
+    assert_eq!(
+        theme_engine::format_template("{codex.session:usage_line}", &context),
+        "7%~"
+    );
 }
 
 #[test]
@@ -1158,7 +1231,7 @@ fn version_text_and_trailing_icon_share_one_update_button() {
                 match &shape.shape {
                     egui::epaint::Shape::Text(shape) => {
                         text.push_str(&shape.galley.job.text);
-                        if shape.galley.job.text == format!("v{}", env!("CARGO_PKG_VERSION")) {
+                        if shape.galley.job.text == studio_core::version_label() {
                             let ink_center = shape.pos.y + shape.galley.mesh_bounds.center().y;
                             assert!((ink_center - rect.center().y).abs() <= 1.0,
                                 "version text is not visually centred: ink={ink_center}, button={rect:?}");
@@ -1174,7 +1247,10 @@ fn version_text_and_trailing_icon_share_one_update_button() {
             output.textures_delta.clear();
             let (icon, tooltip) = if matches!(status, crate::dashboard::UpdateStatus::Available(_))
             {
-                (LucideIcon::Download, "Click to update to v9.8.7")
+                (
+                    LucideIcon::Info,
+                    "Release v9.8.7 is available; updates are manual",
+                )
             } else {
                 (LucideIcon::RefreshCw, "Check for updates")
             };
@@ -1206,29 +1282,27 @@ fn version_text_and_trailing_icon_share_one_update_button() {
             run_test_ui(&context, input, |ui| {
                 footer_button(&mut app, ui);
             });
-            assert_eq!(
-                app.pending_unsaved_action,
-                Some(PendingUnsavedAction::Update {
-                    install: matches!(status, crate::dashboard::UpdateStatus::Available(_)),
-                }),
+            assert!(
+                app.pending_unsaved_action.is_none(),
+                "an informational check must not interrupt unsaved theme work"
             );
-            assert!(app.theme_error.is_none());
+            assert!(app.dirty);
+            assert!(app
+                .theme_error
+                .as_deref()
+                .unwrap()
+                .contains("not connected"));
         }
     }
 }
 
 #[test]
 fn update_button_ignores_repeated_clicks_while_busy() {
-    for status in [
-        crate::dashboard::UpdateStatus::Checking,
-        crate::dashboard::UpdateStatus::Applying,
-    ] {
-        let mut app = app_with_surfaces(vec![root("alpha")]);
-        app.update_status = status;
-        app.request_update_action();
-        assert!(app.theme_error.is_none());
-        assert!(app.pending_unsaved_action.is_none());
-    }
+    let mut app = app_with_surfaces(vec![root("alpha")]);
+    app.update_status = crate::dashboard::UpdateStatus::Checking;
+    app.request_update_action();
+    assert!(app.theme_error.is_none());
+    assert!(app.pending_unsaved_action.is_none());
 }
 
 #[test]

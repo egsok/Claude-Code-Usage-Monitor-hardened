@@ -12,6 +12,9 @@ use windows::Win32::Storage::FileSystem::{
 use crate::models::{AppUsageData, CodexCreditsState};
 use crate::providers::{ProviderId, ProviderSet};
 
+mod legacy_import;
+pub use legacy_import::import_legacy_profile;
+
 pub const POLL_1_MIN_SECONDS: u32 = 60;
 pub const POLL_5_MIN_SECONDS: u32 = 300;
 pub const POLL_15_MIN_SECONDS: u32 = 900;
@@ -25,6 +28,15 @@ pub const MAX_POLL_MINUTES: u32 = i32::MAX as u32 / POLL_1_MIN;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SettingsFile {
+    /// Hardened monitor persistence; independent of the theme document schema.
+    #[serde(default = "settings_schema_version")]
+    pub settings_schema_version: u32,
+    #[serde(default)]
+    pub monitors: Vec<crate::monitors::MonitorSetting>,
+    #[serde(default = "default_true")]
+    pub monitor_widget_visible: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor_placement: Option<PlacementOverride>,
     #[serde(default)]
     pub accounts: crate::accounts::AccountSettings,
     #[serde(default, skip_serializing)]
@@ -105,6 +117,10 @@ pub struct FloatingHost {
 impl Default for SettingsFile {
     fn default() -> Self {
         Self {
+            settings_schema_version: settings_schema_version(),
+            monitors: Vec::new(),
+            monitor_widget_visible: true,
+            monitor_placement: Some(initial_floating_placement()),
             accounts: Default::default(),
             tray_offset: 0,
             taskbar_index: 0,
@@ -244,7 +260,7 @@ pub fn app_data_directory() -> PathBuf {
     let root = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    root.join("ClaudeCodeUsageMonitor")
+    root.join("ClaudeCodeUsageMonitorHardenedUpstream2")
 }
 
 /// Test threads get independent settings, themes, menus, and caches. Do not
@@ -300,7 +316,11 @@ pub fn usage_cache_path() -> PathBuf {
 }
 
 pub fn load_settings() -> SettingsFile {
-    let mut settings = std::fs::read_to_string(settings_path())
+    load_settings_from(&settings_path())
+}
+
+fn load_settings_from(path: &Path) -> SettingsFile {
+    let mut settings = std::fs::read_to_string(path)
         .ok()
         .and_then(|content| decode_settings(&content))
         .unwrap_or_default();
@@ -308,10 +328,67 @@ pub fn load_settings() -> SettingsFile {
     settings
 }
 
-pub fn save_settings(settings: &SettingsFile) -> Result<(), String> {
+#[cfg(test)]
+fn save_settings(settings: &SettingsFile) -> Result<(), String> {
+    let _transaction = SettingsTransaction::acquire(&settings_path())?;
+    save_settings_to(&settings_path(), settings)
+}
+
+fn save_settings_to(path: &Path, settings: &SettingsFile) -> Result<(), String> {
     let mut normalized = settings.clone();
     normalized.normalize();
-    write_json_atomic(&settings_path(), &settings_json(&normalized))
+    write_json_atomic(path, &settings_json(&normalized))
+}
+
+/// The lock covers reading, mutation and replacement across widget and Studio.
+/// Callers must patch only the fields they own, never assign a stale whole snapshot.
+pub fn update_settings(update: impl FnOnce(&mut SettingsFile)) -> Result<SettingsFile, String> {
+    update_settings_at(&settings_path(), update)
+}
+
+fn update_settings_at(
+    path: &Path,
+    update: impl FnOnce(&mut SettingsFile),
+) -> Result<SettingsFile, String> {
+    let _transaction = SettingsTransaction::acquire(path)?;
+    let mut settings = load_settings_from(path);
+    update(&mut settings);
+    settings.normalize();
+    save_settings_to(path, &settings)?;
+    Ok(settings)
+}
+
+struct SettingsTransaction(windows::Win32::Foundation::HANDLE);
+
+impl SettingsTransaction {
+    fn acquire(path: &Path) -> Result<Self, String> {
+        use windows::Win32::Foundation::{CloseHandle, WAIT_ABANDONED, WAIT_OBJECT_0};
+        use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
+        let key = crate::accounts::fingerprint(&path.to_string_lossy().to_lowercase());
+        let name = wide_path(Path::new(&format!(
+            "Local\\CCUMHardenedUpstream2.State.{key}"
+        )));
+        unsafe {
+            let handle = CreateMutexW(None, false, PCWSTR(name.as_ptr()))
+                .map_err(|error| format!("Unable to create settings transaction: {error}"))?;
+            match WaitForSingleObject(handle, 30_000) {
+                WAIT_OBJECT_0 | WAIT_ABANDONED => Ok(Self(handle)),
+                result => {
+                    let _ = CloseHandle(handle);
+                    Err(format!("Unable to lock settings transaction: {result:?}"))
+                }
+            }
+        }
+    }
+}
+
+impl Drop for SettingsTransaction {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = windows::Win32::System::Threading::ReleaseMutex(self.0);
+            let _ = windows::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
 }
 
 fn decode_settings(content: &str) -> Option<SettingsFile> {
@@ -358,17 +435,55 @@ pub fn save_codex_credits(state: &CodexCreditsState) -> Result<(), String> {
 
 pub fn load_usage_cache() -> Option<UsageCache> {
     let mut cache: UsageCache = read_json(&usage_cache_path())?;
+    if !valid_usage_cache(&cache.data) {
+        return None;
+    }
     cache.data.invalidate_changed_credentials();
     Some(cache)
 }
 
 pub fn save_usage_cache(data: &AppUsageData, poll_ok: bool) -> Result<(), String> {
+    let path = usage_cache_path();
+    let _transaction = SettingsTransaction::acquire(&path)?;
+    if !valid_usage_cache(data) {
+        return Err("Invalid provider usage cannot be persisted".into());
+    }
+    let mut merged = data.clone();
+    if let Some(mut previous) =
+        read_json::<UsageCache>(&path).filter(|cache| valid_usage_cache(&cache.data))
+    {
+        previous.data.invalidate_changed_credentials();
+        for (provider, usage) in previous.data.iter() {
+            // Account rows are authoritative even when usage is absent: a
+            // changed login must never resurrect an older account's values.
+            if merged.get(provider).is_none()
+                && !data
+                    .accounts
+                    .iter()
+                    .any(|account| account.provider == provider)
+            {
+                let mut usage = usage.clone();
+                usage.stale = true;
+                merged.insert(provider, usage);
+            }
+        }
+        for mut account in previous.data.accounts {
+            if !data.accounts.iter().any(|current| {
+                current.provider == account.provider && current.profile.id == account.profile.id
+            }) {
+                if let Some(usage) = account.usage.as_mut() {
+                    usage.stale = true;
+                }
+                merged.accounts.push(account);
+            }
+        }
+    }
     write_json_atomic(
-        &usage_cache_path(),
+        &path,
         &UsageCache {
             updated_unix: now_unix(),
             poll_ok,
-            data: data.clone(),
+            data: merged,
         },
     )
 }
@@ -417,6 +532,28 @@ fn wide_path(path: &Path) -> Vec<u16> {
 fn default_poll_interval() -> u32 {
     POLL_15_MIN
 }
+
+fn valid_usage_cache(data: &AppUsageData) -> bool {
+    data.all_usage().all(|usage| {
+        usage.sections().all(|section| {
+            section.percentage.is_finite() && (0.0..=100.0).contains(&section.percentage)
+        })
+    })
+}
+fn settings_schema_version() -> u32 {
+    2
+}
+
+fn initial_floating_placement() -> PlacementOverride {
+    PlacementOverride {
+        nest: "floating".into(),
+        monitor_index: 0,
+        screen_x: 100,
+        screen_y: 100,
+        tray_offset: 0,
+        floating_host: None,
+    }
+}
 fn default_true() -> bool {
     true
 }
@@ -433,6 +570,99 @@ fn now_unix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_transaction_subprocess() {
+        let Some(path) = std::env::var_os("CCUM_TEST_SETTINGS_TRANSACTION_PATH") else {
+            return;
+        };
+        let dimension = std::env::var_os("CCUM_TEST_SETTINGS_DIMENSION").is_some();
+        for _ in 0..20 {
+            update_settings_at(Path::new(&path), |settings| {
+                if dimension {
+                    settings.dashboard_width =
+                        Some(settings.dashboard_width.unwrap_or(100.0) + 1.0);
+                } else {
+                    settings.poll_interval_ms += POLL_1_MIN;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            })
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn separate_process_transactions_preserve_concurrent_monitor_and_studio_edits() {
+        use std::os::windows::process::CommandExt;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("settings.json");
+        let initial = SettingsFile::default();
+        save_settings_to(&path, &initial).unwrap();
+        let spawn = |dimension: bool| {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            command
+                .args([
+                    "--exact",
+                    "app_settings::tests::settings_transaction_subprocess",
+                ])
+                .env("CCUM_TEST_SETTINGS_TRANSACTION_PATH", &path);
+            if dimension {
+                command.env("CCUM_TEST_SETTINGS_DIMENSION", "1");
+            }
+            command.spawn().unwrap()
+        };
+        let mut monitor = spawn(false);
+        let mut studio = spawn(true);
+        assert!(monitor.wait().unwrap().success());
+        assert!(studio.wait().unwrap().success());
+        let saved = load_settings_from(&path);
+        assert_eq!(
+            saved.poll_interval_ms,
+            initial.poll_interval_ms + 20 * POLL_1_MIN
+        );
+        assert_eq!(saved.dashboard_width, Some(120.0));
+    }
+
+    #[test]
+    fn independent_provider_saves_preserve_success_times_and_reject_bad_values() {
+        let usage = |percentage, updated_at_unix| crate::models::UsageData {
+            session: crate::models::UsageSection {
+                available: true,
+                percentage,
+                resets_at: None,
+            },
+            updated_at_unix: Some(updated_at_unix),
+            ..Default::default()
+        };
+        save_usage_cache(
+            &AppUsageData::from_iter([(ProviderId::Claude, usage(25.0, 101))]),
+            true,
+        )
+        .unwrap();
+        save_usage_cache(
+            &AppUsageData::from_iter([(ProviderId::Codex, usage(35.0, 202))]),
+            true,
+        )
+        .unwrap();
+        let cache = load_usage_cache().unwrap();
+        assert_eq!(
+            cache.data.get(ProviderId::Claude).unwrap().updated_at_unix,
+            Some(101)
+        );
+        assert!(cache.data.get(ProviderId::Claude).unwrap().stale);
+        assert_eq!(
+            cache.data.get(ProviderId::Codex).unwrap().updated_at_unix,
+            Some(202)
+        );
+        let before = std::fs::read(usage_cache_path()).unwrap();
+        assert!(save_usage_cache(
+            &AppUsageData::from_iter([(ProviderId::Codex, usage(f64::NAN, 303))]),
+            true
+        )
+        .is_err());
+        assert_eq!(std::fs::read(usage_cache_path()).unwrap(), before);
+    }
 
     #[test]
     fn application_files_stay_inside_the_test_directory() {

@@ -90,6 +90,44 @@ pub fn account_source_signature(provider: ProviderId, path: &std::path::Path) ->
     }
 }
 
+/// Migration must bind a default snapshot to exactly the source used by polling,
+/// including Desktop/WSL fallback when there is no native Claude login file.
+pub fn default_account_source(provider: ProviderId) -> (Option<std::path::PathBuf>, String) {
+    accounts::default_account_source(provider)
+}
+
+pub fn has_paused_accounts(data: &AppUsageData) -> bool {
+    data.accounts.iter().any(|account| {
+        account
+            .error
+            .is_some_and(|error| error.is_auth() || error == PollError::NoCredentials)
+    })
+}
+
+pub fn paused_account_credentials_changed(data: &AppUsageData) -> bool {
+    accounts::paused_credentials_changed(data)
+}
+
+/// Healthy accounts keep publishing while failed accounts use the normal short
+/// retry schedule. Authentication is recovered by watching local sources only.
+pub fn account_retry_delay_ms(
+    data: &AppUsageData,
+    retry_count: u32,
+    interval_ms: u32,
+) -> Option<u32> {
+    data.accounts
+        .iter()
+        .any(|account| account.error.is_some_and(PollError::is_transient))
+        .then(|| {
+            30_000u32
+                .saturating_mul(
+                    1u32.checked_shl(retry_count.saturating_sub(1))
+                        .unwrap_or(u32::MAX),
+                )
+                .min(interval_ms)
+        })
+}
+
 pub fn poll(
     enabled_providers: ProviderSet,
     settings: &crate::accounts::AccountSettings,
@@ -160,7 +198,14 @@ pub fn carry_forward_failures(
         {
             continue;
         }
-        if merged.get(provider).is_some() {
+        if let Some(current) = merged.get(provider) {
+            if provider == ProviderId::Claude {
+                if let Some(last) = previous.get(provider) {
+                    let mut current = current.clone();
+                    carry_model_limits(&mut current, last);
+                    merged.insert(provider, current);
+                }
+            }
             continue;
         }
         if let Some(last) = previous.get(provider) {
@@ -170,6 +215,23 @@ pub fn carry_forward_failures(
         }
     }
     merged
+}
+
+fn carry_model_limits(current: &mut UsageData, previous: &UsageData) {
+    if !current.limits_authoritative && current.limits.is_empty() {
+        current.limits = previous.limits.clone();
+        for limit in &mut current.limits {
+            limit.stale = true;
+        }
+    }
+}
+
+fn stamp_success(mut usage: UsageData) -> UsageData {
+    usage.updated_at_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|time| time.as_secs());
+    usage
 }
 
 #[cfg(test)]
@@ -221,7 +283,10 @@ where
                 let Some(provider) = providers.get(index).copied() else {
                     break;
                 };
-                if sender.send((provider, poll_provider(provider))).is_err() {
+                if sender
+                    .send((provider, poll_provider(provider).map(stamp_success)))
+                    .is_err()
+                {
                     break;
                 }
             });
@@ -561,7 +626,16 @@ pub fn is_past_reset(data: &UsageData) -> bool {
     }
     let now = SystemTime::now();
     let past = |s: &UsageSection| matches!(s.resets_at, Some(t) if now.duration_since(t).is_ok());
-    data.sections().any(past)
+    [&data.session, &data.weekly]
+        .into_iter()
+        .chain(data.monthly.iter())
+        .chain(
+            data.limits
+                .iter()
+                .filter(|limit| !limit.stale)
+                .map(|limit| &limit.usage),
+        )
+        .any(past)
 }
 
 pub fn app_is_past_reset(data: &AppUsageData) -> bool {

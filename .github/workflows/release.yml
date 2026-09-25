@@ -10,7 +10,7 @@ permissions:
 
 env:
   RELEASE_ASSET_NAME: claude-code-usage-monitor.exe
-  WINGET_PACKAGE_ID: CodeZeno.ClaudeCodeUsageMonitor
+  WINGET_PACKAGE_ID: egsok.ClaudeCodeUsageMonitorHardened
 
 jobs:
   dependency-security:
@@ -29,7 +29,7 @@ jobs:
       # Keep in sync with rust-toolchain.toml.
       - uses: dtolnay/rust-toolchain@1.95.0
 
-      - name: Test updater safeguards
+      - name: Test informational release safeguards
         run: cargo test --locked updater
 
       - name: Build release binary

@@ -2,6 +2,13 @@ use super::*;
 
 fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> AppState {
     AppState {
+        surface_hwnd: SendHwnd::from_hwnd(HWND::default()),
+        monitors: Vec::new(),
+        monitor_settings: Vec::new(),
+        managed_windows: Vec::new(),
+        managed_visible: true,
+        managed_placement: None,
+        observed_settings: SettingsFile::default(),
         hwnd: SendHwnd::from_hwnd(HWND::default()),
         taskbar_hwnd: None,
         tray_notify_hwnd: None,
@@ -10,11 +17,11 @@ fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> AppState {
         embedded: false,
         language_override: None,
         language: LanguageId::English,
-        install_channel: InstallChannel::Portable,
         providers: ProviderSet::default(),
         accounts: Default::default(),
         data: None,
         poll_interval_ms: POLL_15_MIN,
+        polling_enabled: false,
         retry_count: 0,
         force_notify_auth_error: false,
         auth_error_paused_polling: false,
@@ -333,7 +340,7 @@ fn mirror_registration_preserves_the_primary_host_and_embedding_state() {
     let mirror = HWND(2usize as *mut _);
     let old_taskbar = HWND(3usize as *mut _);
     let new_taskbar = HWND(4usize as *mut _);
-    state.hwnd = SendHwnd::from_hwnd(primary);
+    state.surface_hwnd = SendHwnd::from_hwnd(primary);
     state.taskbar_hwnd = Some(SendHwnd::from_hwnd(old_taskbar));
     state.tray_notify_hwnd = Some(SendHwnd::from_hwnd(old_taskbar));
     state.embedded = false;

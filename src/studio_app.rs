@@ -128,7 +128,7 @@ pub fn handle_cli_mode(args: &[String]) -> bool {
         .expect("src/icons/16x16.png must be a valid PNG app icon");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Usage Monitor")
+            .with_title(crate::dashboard::DASHBOARD_TITLE)
             .with_inner_size([dashboard_width, dashboard_height])
             .with_icon(dashboard_icon),
         renderer: eframe::Renderer::Glow,
@@ -136,7 +136,7 @@ pub fn handle_cli_mode(args: &[String]) -> bool {
         ..Default::default()
     };
     if let Err(error) = eframe::run_native(
-        "ClaudeCodeUsageMonitor.Studio",
+        "ClaudeCodeUsageMonitorHardenedUpstream2.Studio",
         options,
         Box::new(move |context| Ok(Box::new(StudioApp::new(context, owner, initial_page)))),
     ) {
@@ -250,7 +250,6 @@ struct ThemeDeletionConfirmation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum PendingUnsavedAction {
     Close,
-    Update { install: bool },
     ActivateTheme(PathBuf),
     NewTheme,
 }
@@ -670,12 +669,10 @@ impl eframe::App for StudioApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        // Reload first so a monitor-process settings update made while the
-        // dashboard was open is not overwritten by this final size save.
-        let mut settings = app_settings::load_settings();
-        settings.dashboard_width = self.settings.dashboard_width;
-        settings.dashboard_height = self.settings.dashboard_height;
-        if let Err(error) = app_settings::save_settings(&settings) {
+        if let Err(error) = app_settings::update_settings(|settings| {
+            settings.dashboard_width = self.settings.dashboard_width;
+            settings.dashboard_height = self.settings.dashboard_height;
+        }) {
             crate::diagnose::log(format!("dashboard size save failed: {error}"));
         }
     }

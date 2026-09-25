@@ -546,18 +546,21 @@ pub(super) fn format_usage_line(base: &str, context: &DataContext) -> Option<Str
         .get(&format!("{provider}.{window}.{metric}"))
         .unwrap_or(0.0);
     let percentage = format_value(percentage, "0", context);
+    let stale = context.get(&format!("{provider}.stale")).unwrap_or(0.0) != 0.0
+        || context.get(&format!("{base}.stale")).unwrap_or(0.0) != 0.0;
+    let marker = if stale { "~" } else { "" };
     if context
         .get(&format!("{provider}.{window}.reset.unix"))
         .unwrap_or(0.0)
         <= 0.0
     {
-        return Some(format!("{percentage}%"));
+        return Some(format!("{percentage}%{marker}"));
     }
     let seconds = context
         .get(&format!("{provider}.{window}.reset.seconds"))
         .unwrap_or(0.0);
     Some(format!(
-        "{percentage}% · {}",
+        "{percentage}% · {}{marker}",
         format_value(seconds, "duration_short", context)
     ))
 }
@@ -566,7 +569,9 @@ pub(super) fn format_usage_badge(base: &str, context: &DataContext) -> Option<St
     let line = format_usage_line(base, context)?;
     Some(
         line.split_once(" · ")
-            .map(|(percentage, _)| percentage.to_string())
+            .map(|(percentage, _)| {
+                format!("{percentage}{}", if line.ends_with('~') { "~" } else { "" })
+            })
             .unwrap_or(line),
     )
 }
@@ -580,12 +585,18 @@ pub(super) fn format_value(value: f64, format: &str, context: &DataContext) -> S
         return value;
     }
     if format.eq_ignore_ascii_case("duration_short") {
-        let seconds = value.max(0.0).round() as u64;
+        let seconds = value.max(0.0).floor() as u64;
         let days = seconds / 86_400;
         let hours = seconds / 3_600;
         let minutes = seconds / 60;
         return if days > 0 {
-            format!("{days}{}", localized(context, "i18n.day_suffix", "d"))
+            let tenths = seconds / 8_640;
+            format!(
+                "{}.{:01}{}",
+                tenths / 10,
+                tenths % 10,
+                localized(context, "i18n.day_suffix", "d")
+            )
         } else if hours > 0 {
             format!("{hours}{}", localized(context, "i18n.hour_suffix", "h"))
         } else if minutes > 0 {

@@ -1,16 +1,10 @@
 use semver::Version;
 use serde::Deserialize;
 
-use super::download::AssetIntegrity;
-use super::github_repo;
-
-pub(super) const RELEASE_ASSET_NAME: &str = "claude-code-usage-monitor.exe";
-
 #[derive(Clone, Debug)]
 pub struct ReleaseDescriptor {
     pub latest_version: String,
-    pub(super) asset_url: String,
-    pub(super) integrity: AssetIntegrity,
+    pub release_url: String,
 }
 
 #[derive(Deserialize)]
@@ -18,15 +12,6 @@ pub(super) struct GitHubRelease {
     tag_name: String,
     draft: bool,
     prerelease: bool,
-    assets: Vec<GitHubAsset>,
-}
-
-#[derive(Deserialize)]
-struct GitHubAsset {
-    name: String,
-    browser_download_url: String,
-    size: u64,
-    digest: Option<String>,
 }
 
 pub(super) fn release_descriptor(
@@ -35,48 +20,74 @@ pub(super) fn release_descriptor(
 ) -> Result<Option<ReleaseDescriptor>, String> {
     let latest = parse_version(&release.tag_name)?;
     let current = parse_version(current)?;
-    // This updater follows stable releases, even if a tag was mislabelled in GitHub.
-    if release.draft || release.prerelease || !latest.pre.is_empty() {
+    if release.draft
+        || release.prerelease
+        || !latest.pre.is_empty()
+        || !latest.cmp_precedence(&current).is_gt()
+    {
         return Ok(None);
     }
-    if !latest.cmp_precedence(&current).is_gt() {
-        return Ok(None);
-    }
-
-    let mut matches = release
-        .assets
-        .iter()
-        .filter(|asset| asset.name == RELEASE_ASSET_NAME);
-    let asset = matches
-        .next()
-        .ok_or_else(|| format!("The latest release is missing {RELEASE_ASSET_NAME}."))?;
-    if matches.next().is_some() {
-        return Err(format!(
-            "The latest release has duplicate {RELEASE_ASSET_NAME} assets."
-        ));
-    }
-
-    let (owner, repo) = github_repo()?;
-    let expected_url = format!(
-        "https://github.com/{owner}/{repo}/releases/download/{}/{RELEASE_ASSET_NAME}",
-        release.tag_name
-    );
-    if asset.browser_download_url != expected_url {
-        return Err("The update asset URL does not match the expected GitHub release.".into());
-    }
-    let integrity = AssetIntegrity::new(asset.size, asset.digest.as_deref())?;
-
+    let (owner, repo) = super::github_repo()?;
     Ok(Some(ReleaseDescriptor {
         latest_version: latest.to_string(),
-        asset_url: expected_url,
-        integrity,
+        release_url: format!(
+            "https://github.com/{owner}/{repo}/releases/tag/{}",
+            release.tag_name
+        ),
     }))
 }
 
 fn parse_version(version: &str) -> Result<Version, String> {
     Version::parse(version.strip_prefix('v').unwrap_or(version))
-        .map_err(|e| format!("Invalid release version {version:?}: {e}"))
+        .map_err(|error| format!("Invalid release version {version:?}: {error}"))
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    fn release(tag: &str) -> GitHubRelease {
+        GitHubRelease {
+            tag_name: tag.into(),
+            draft: false,
+            prerelease: false,
+        }
+    }
+
+    #[test]
+    fn informational_checks_need_no_executable_asset_or_digest() {
+        let release = release_descriptor(release("v3.0.0"), "2.15.14-hardened.1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(release.latest_version, "3.0.0");
+        assert_eq!(
+            release.release_url,
+            "https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v3.0.0"
+        );
+    }
+
+    #[test]
+    fn only_newer_stable_releases_are_reported() {
+        for tag in ["v1.7.0", "v2.15.14-alpha.1"] {
+            assert!(release_descriptor(release(tag), "2.15.14-hardened.1")
+                .unwrap()
+                .is_none());
+        }
+        let mut draft = release("v3.0.0");
+        draft.draft = true;
+        assert!(release_descriptor(draft, "2.15.14-hardened.1")
+            .unwrap()
+            .is_none());
+        assert!(
+            release_descriptor(release("v2.15.14"), "2.15.14-hardened.1")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            release_descriptor(release("v2.15.14+build.2"), "2.15.14+build.1")
+                .unwrap()
+                .is_none()
+        );
+        assert!(release_descriptor(release("not-a-version"), "2.15.14").is_err());
+    }
+}

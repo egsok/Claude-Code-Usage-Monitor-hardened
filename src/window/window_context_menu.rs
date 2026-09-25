@@ -30,6 +30,7 @@ pub(super) fn show_context_menu_document(
             origin.as_ref(),
             &mut actions,
         );
+        let monitors = managed::append_menu(menu);
         let mut point = POINT::default();
         let _ = GetCursorPos(&mut point);
         let _ = SetForegroundWindow(hwnd);
@@ -44,6 +45,9 @@ pub(super) fn show_context_menu_document(
         )
         .0 as usize;
         let _ = DestroyMenu(menu);
+        if managed::menu_command(hwnd, selected, &monitors) {
+            return;
+        }
         if selected >= 1_000 {
             if let Some(action) = actions.get(selected - 1_000).cloned() {
                 execute_context_menu_action(hwnd, action, origin);
@@ -145,7 +149,10 @@ pub(super) fn context_menu_action_flags(
             state.poll_interval_ms == seconds.saturating_mul(1_000)
         }
         ContextMenuAction::ToggleProvider { provider } => state.providers.contains(*provider),
-        ContextMenuAction::ToggleStartup => is_startup_enabled(),
+        ContextMenuAction::ToggleStartup => return MF_GRAYED,
+        ContextMenuAction::ToggleWidget if managed::primary_index(state).is_some() => {
+            state.managed_visible
+        }
         ContextMenuAction::ToggleWidget => state
             .active_theme
             .as_ref()
@@ -210,7 +217,7 @@ pub(super) fn context_menu_action_flags(
     let disabled = matches!(
         action,
         ContextMenuAction::CheckForUpdates
-            if matches!(state.update_status, UpdateStatus::Checking | UpdateStatus::Applying)
+            if matches!(state.update_status, UpdateStatus::Checking)
     ) || matches!(
         action,
         ContextMenuAction::LayerActions { .. } | ContextMenuAction::ToggleLayerRender { .. }
@@ -284,12 +291,24 @@ pub(super) fn execute_context_menu_action(
     };
     if let Some(command) = static_command {
         unsafe {
-            let _ = PostMessageW(Some(hwnd), WM_COMMAND, WPARAM(command as usize), LPARAM(0));
+            let controller = lock_state()
+                .as_ref()
+                .map(|s| s.hwnd.to_hwnd())
+                .unwrap_or(hwnd);
+            let _ = PostMessageW(
+                Some(controller),
+                WM_COMMAND,
+                WPARAM(command as usize),
+                LPARAM(0),
+            );
         }
         return;
     }
     match action {
         ContextMenuAction::ToggleWidget => {
+            if managed::toggle_visible() {
+                return;
+            }
             let target = lock_state()
                 .as_ref()
                 .and_then(|state| state.active_theme.as_ref())
@@ -299,6 +318,7 @@ pub(super) fn execute_context_menu_action(
                     execute_mouse_action_source(surface_index, &root_id, "toggle(self, render)");
             }
         }
+        ContextMenuAction::LegacyResetPosition => managed::reset_position(hwnd),
         ContextMenuAction::ToggleLayerRender { target } => {
             let Some((surface_index, self_id)) = context_menu_action_origin(origin) else {
                 return;

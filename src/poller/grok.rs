@@ -1,8 +1,4 @@
-use std::io::Read;
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
@@ -17,11 +13,10 @@ const GROK_BILLING_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing?forma
 /// Static marker the proxy uses to route CLI user-token requests.
 const GROK_TOKEN_AUTH: &str = "xai-grok-cli";
 const GROK_CLIENT_MODE: &str = "cli";
-/// Used only when the installed CLI cannot be asked for its own version.
+/// Passive polling uses this version unless explicitly configured.
 const DEFAULT_GROK_CLIENT_VERSION: &str = "1.0.0";
 const GROK_HOME_ENV: &str = "GROK_HOME";
 const GROK_CLIENT_VERSION_ENV: &str = "GROK_CLIENT_VERSION";
-const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// One entry of `auth.json`, keyed by `"{issuer}::{client_id}"` or the
 /// legacy `"https://accounts.x.ai/sign-in"` scope.
@@ -31,8 +26,6 @@ struct GrokAuthEntry {
     key: String,
     #[serde(default)]
     user_id: Option<String>,
-    #[serde(default)]
-    refresh_token: Option<String>,
     #[serde(default)]
     expires_at: Option<String>,
 }
@@ -134,25 +127,7 @@ pub(super) fn poll_grok() -> Result<UsageData, PollError> {
         }
     };
 
-    match fetch_grok_usage(&session) {
-        Err(PollError::AuthRequired) => {
-            // The CLI owns this file and refreshes it silently whenever it
-            // needs a token, so let it do the work rather than racing its
-            // lock with a refresh of our own. Without a refresh token it
-            // would fall back to an interactive browser sign-in, which a
-            // background monitor must never trigger.
-            if !session.can_refresh {
-                return Err(PollError::TokenExpired);
-            }
-            cli_refresh_grok_token();
-            let refreshed = read_grok_session(&path).ok_or(PollError::TokenExpired)?;
-            if refreshed.access_token == session.access_token {
-                return Err(PollError::TokenExpired);
-            }
-            fetch_grok_usage(&refreshed)
-        }
-        other => other,
-    }
+    fetch_grok_usage(&session)
 }
 
 pub(super) fn credential_watch_snapshot(_all_sources: bool) -> Vec<String> {
@@ -166,8 +141,6 @@ pub(super) fn credential_watch_snapshot(_all_sources: bool) -> Vec<String> {
 struct GrokSession {
     access_token: String,
     user_id: String,
-    /// The CLI can renew this session silently, without a browser.
-    can_refresh: bool,
 }
 
 fn grok_auth_path() -> Option<PathBuf> {
@@ -219,9 +192,6 @@ fn select_grok_session(content: &str) -> Option<GrokSession> {
         .map(|entry| GrokSession {
             access_token: entry.key.trim().to_string(),
             user_id: entry.user_id.unwrap_or_default().trim().to_string(),
-            can_refresh: entry
-                .refresh_token
-                .is_some_and(|token| !token.trim().is_empty()),
         })
 }
 
@@ -291,6 +261,7 @@ fn grok_usage_from_billing(response: GrokBillingResponse) -> Option<UsageData> {
         monthly: monthly_period.then_some(window),
         credits: grok_credits(&config, response.on_demand_enabled),
         stale: false,
+        ..UsageData::default()
     })
 }
 
@@ -307,6 +278,7 @@ fn grok_limits(products: &[GrokProductUsage], resets_at: Option<SystemTime>) -> 
                 .filter(|product| !product.is_empty())?;
             let percentage = entry.usage_percent?;
             Some(UsageLimit {
+                stale: false,
                 key: limit_slug(product),
                 kind: "product".into(),
                 label: product.to_string(),
@@ -370,169 +342,9 @@ fn period_end(value: Option<&serde_json::Value>) -> Option<SystemTime> {
     }
 }
 
-/// Cache a detected CLI version, but retry after transient detection failures.
 fn grok_client_version() -> String {
-    static VERSION: OnceLock<String> = OnceLock::new();
-    cached_cli_detection(&VERSION, || {
-        non_empty_environment(GROK_CLIENT_VERSION_ENV).or_else(cli_grok_version)
-    })
-    .unwrap_or_else(|| DEFAULT_GROK_CLIENT_VERSION.to_string())
-}
-
-/// Only successful discovery is stable enough to cache for this process.
-fn cached_cli_detection(
-    cache: &OnceLock<String>,
-    detect: impl FnOnce() -> Option<String>,
-) -> Option<String> {
-    cache.get().cloned().or_else(|| {
-        let detected = detect()?;
-        let _ = cache.set(detected.clone());
-        Some(detected)
-    })
-}
-
-fn cli_grok_version() -> Option<String> {
-    let version = read_cli_version(&resolve_windows_grok_path(), Duration::from_secs(5))?;
-    diagnose::log(format!("Grok CLI reports version {version}"));
-    Some(version)
-}
-
-fn read_cli_version(path: &str, timeout: Duration) -> Option<String> {
-    let start = std::time::Instant::now();
-    let mut child = grok_command(path, &["version"])
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .ok()?;
-    let stdout = child.stdout.take()?;
-    let (sender, receiver) = std::sync::mpsc::channel();
-    // Drain while the process runs so a full pipe cannot block its exit.
-    // Bound both the captured output and the wait, including inherited pipes.
-    std::thread::spawn(move || {
-        let mut output = String::new();
-        let result = stdout.take(64 * 1024).read_to_string(&mut output);
-        let _ = sender.send(result.ok().map(|_| output));
-    });
-    if !wait_for_command(&mut child, timeout) {
-        return None;
-    }
-    let output = receiver
-        .recv_timeout(timeout.saturating_sub(start.elapsed()))
-        .ok()??;
-    first_version(&output)
-}
-
-/// Pick the first `major.minor.patch` token out of arbitrary CLI output.
-fn first_version(text: &str) -> Option<String> {
-    text.split(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .map(|token| token.trim_matches('.'))
-        .find(|token| {
-            let mut parts = token.split('.');
-            let numeric = |part: Option<&str>| {
-                part.is_some_and(|part| {
-                    !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())
-                })
-            };
-            numeric(parts.next()) && numeric(parts.next()) && numeric(parts.next())
-        })
-        .map(str::to_string)
-}
-
-/// `grok models` needs a valid token but no model call, so it refreshes the
-/// stored session without spending any of the allowance.
-fn cli_refresh_grok_token() {
-    let grok_path = resolve_windows_grok_path();
-    diagnose::log(format!(
-        "attempting Windows Grok token refresh via {grok_path}"
-    ));
-
-    let mut child = match grok_command(&grok_path, &["models"]).spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            diagnose::log_error("unable to spawn Windows Grok token refresh", error);
-            return;
-        }
-    };
-    wait_for_command(&mut child, Duration::from_secs(30));
-}
-
-fn grok_command(grok_path: &str, args: &[&str]) -> Command {
-    let lowercase = grok_path.to_lowercase();
-    let mut command = if lowercase.ends_with(".cmd") || lowercase.ends_with(".bat") {
-        let mut command = Command::new("cmd.exe");
-        command.arg("/d").arg("/c").arg(grok_path).args(args);
-        command
-    } else if lowercase.ends_with(".ps1") {
-        let mut command = Command::new("powershell.exe");
-        command
-            .arg("-NoProfile")
-            .arg("-NonInteractive")
-            .arg("-ExecutionPolicy")
-            .arg("Bypass")
-            .arg("-File")
-            .arg(grok_path)
-            .args(args);
-        command
-    } else {
-        let mut command = Command::new(grok_path);
-        command.args(args);
-        command
-    };
-    command
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-
-    command
-}
-
-fn resolve_windows_grok_path() -> String {
-    static PATH: OnceLock<String> = OnceLock::new();
-    cached_cli_detection(&PATH, || {
-        // The official installer drops a real executable in ~/.grok/bin;
-        // prefer it over an npm shim that would cost an extra cmd.exe hop.
-        for name in ["grok.exe", "grok.cmd", "grok.ps1", "grok"] {
-            if let Ok(output) = Command::new("where.exe")
-                .arg(name)
-                .creation_flags(CREATE_NO_WINDOW)
-                .output()
-            {
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    if let Some(path) = stdout
-                        .lines()
-                        .next()
-                        .map(str::trim)
-                        .filter(|path| !path.is_empty())
-                    {
-                        return Some(path.to_string());
-                    }
-                }
-            }
-        }
-        None
-    })
-    .unwrap_or_else(|| "grok.cmd".to_string())
-}
-
-fn wait_for_command(child: &mut std::process::Child, timeout: Duration) -> bool {
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return status.success(),
-            Ok(None) if start.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return false;
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return false;
-            }
-        }
-    }
+    non_empty_environment(GROK_CLIENT_VERSION_ENV)
+        .unwrap_or_else(|| DEFAULT_GROK_CLIENT_VERSION.to_string())
 }
 
 fn non_empty_environment(name: &str) -> Option<String> {
@@ -586,7 +398,6 @@ mod tests {
         let session = select_grok_session(content).unwrap();
         assert_eq!(session.access_token, "newer");
         assert_eq!(session.user_id, "u-new");
-        assert!(session.can_refresh);
     }
 
     #[test]
@@ -597,7 +408,6 @@ mod tests {
         .unwrap();
         assert_eq!(session.access_token, "token");
         // Nothing to renew with, so the CLI must not be asked to sign in.
-        assert!(!session.can_refresh);
         assert!(select_grok_session("{}").is_none());
         assert!(select_grok_session("not json").is_none());
     }
@@ -806,34 +616,6 @@ mod tests {
     }
 
     #[test]
-    fn a_cli_version_is_picked_out_of_arbitrary_output() {
-        assert_eq!(
-            first_version("grok 1.24.3 (abc1234)").as_deref(),
-            Some("1.24.3")
-        );
-        assert_eq!(
-            first_version("grok-build v2.0.11\n").as_deref(),
-            Some("2.0.11")
-        );
-        assert_eq!(first_version("no version here"), None);
-    }
-
-    #[test]
-    fn failed_cli_detection_is_retried_and_success_is_cached() {
-        let cache = OnceLock::new();
-        assert_eq!(cached_cli_detection(&cache, || None), None);
-        assert_eq!(
-            cached_cli_detection(&cache, || Some("1.2.3".into())).as_deref(),
-            Some("1.2.3")
-        );
-        assert_eq!(
-            cached_cli_detection(&cache, || panic!("successful detection must be cached"))
-                .as_deref(),
-            Some("1.2.3")
-        );
-    }
-
-    #[test]
     fn numeric_period_ends_reject_overflow_without_losing_valid_timestamps() {
         for value in [serde_json::json!(1e300), serde_json::json!(1e25)] {
             assert_eq!(period_end(Some(&value)), None);
@@ -847,50 +629,5 @@ mod tests {
                 Some(UNIX_EPOCH + Duration::from_secs(1_790_000_000))
             );
         }
-    }
-
-    #[test]
-    fn version_detection_runs_windows_shims_with_spaces_in_the_path() {
-        let root = crate::app_settings::app_data_directory().join("Grok CLI shims");
-        std::fs::create_dir_all(&root).unwrap();
-        for (extension, script) in [
-            (
-                "cmd",
-                "@echo off\r\nif not \"%~1\"==\"version\" exit /b 1\r\necho grok 1.2.3\r\n",
-            ),
-            (
-                "ps1",
-                "if ($args[0] -ne 'version') { exit 1 }; Write-Output 'grok 1.2.3'",
-            ),
-        ] {
-            let path = root.join(format!("grok.{extension}"));
-            std::fs::write(&path, script).unwrap();
-            assert_eq!(
-                read_cli_version(path.to_str().unwrap(), Duration::from_secs(5)).as_deref(),
-                Some("1.2.3"),
-                "{}",
-                path.display()
-            );
-        }
-    }
-
-    #[test]
-    fn version_detection_rejects_failed_commands_and_times_out() {
-        let root = crate::app_settings::app_data_directory();
-        let failed = root.join("failed-version.cmd");
-        std::fs::write(&failed, "@echo grok 1.2.3\r\n@exit /b 1\r\n").unwrap();
-        assert_eq!(
-            read_cli_version(failed.to_str().unwrap(), Duration::from_secs(5)),
-            None
-        );
-
-        let slow = root.join("slow-version.ps1");
-        std::fs::write(&slow, "Start-Sleep -Seconds 30; Write-Output 'grok 1.2.3'").unwrap();
-        let start = std::time::Instant::now();
-        assert_eq!(
-            read_cli_version(slow.to_str().unwrap(), Duration::from_millis(200)),
-            None
-        );
-        assert!(start.elapsed() < Duration::from_secs(5));
     }
 }

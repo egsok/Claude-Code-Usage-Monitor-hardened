@@ -11,6 +11,7 @@ mod font_catalog;
 mod https_test;
 mod localization;
 mod models;
+mod monitors;
 mod native_interop;
 mod poller;
 mod providers;
@@ -44,15 +45,36 @@ fn main() {
         }
     }
 
-    if studio_app::handle_cli_mode(&args) {
-        return;
+    if let Some(index) = args.iter().position(|arg| arg == "--import-v1") {
+        let result = args
+            .get(index + 1)
+            .filter(|value| !value.starts_with("--"))
+            .ok_or_else(|| "--import-v1 requires a snapshot directory.".to_string())
+            .and_then(|directory| {
+                app_settings::import_legacy_profile(std::path::Path::new(directory))
+            });
+        match result {
+            Ok(imported) => diagnose::log(format!("v1 snapshot imported={imported}")),
+            Err(error) => {
+                diagnose::log_error("v1 snapshot import failed", &error);
+                use windows::core::{w, PCWSTR};
+                use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+                let message = native_interop::wide_str(&error);
+                unsafe {
+                    MessageBoxW(
+                        None,
+                        PCWSTR(message.as_ptr()),
+                        w!("Hardened v2 experiment: import failed"),
+                        MB_OK | MB_ICONERROR,
+                    );
+                }
+                std::process::exit(2);
+            }
+        }
     }
 
-    if let Some(exit_code) = updater::handle_cli_mode(&args) {
-        if diagnose_enabled {
-            diagnose::log(format!("cli mode exited with code {exit_code}"));
-        }
-        std::process::exit(exit_code);
+    if studio_app::handle_cli_mode(&args) {
+        return;
     }
 
     if diagnose_enabled {

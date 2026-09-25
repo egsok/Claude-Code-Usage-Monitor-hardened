@@ -65,6 +65,11 @@ cursor_window_title = "Cursor 使用量監控"
 grok_window_title = "Grok 使用量監控"
 
 [translations]
+"Disabled in the experimental build" = "Disabled in the experimental build"
+"Release v{version} is available; updates are manual" = "Release v{version} is available; updates are manual"
+"Monitors" = "Monitors"
+"Monitors: theme has no taskbar surface" = "Monitors: theme has no taskbar surface"
+"Reset position" = "Reset position"
 "Absolute value" = "絕對值"
 "Action" = "Action"
 "Actions run from top to bottom in one update." = "動作會在一次更新中由上而下執行。"

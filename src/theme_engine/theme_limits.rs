@@ -55,6 +55,7 @@ impl DataContext {
                 },
             ),
             ("is_active", limit.is_active as u8 as f64),
+            ("stale", limit.stale as u8 as f64),
         ] {
             self.insert(&format!("{base}.{metric}"), value);
         }
@@ -130,7 +131,7 @@ impl DataContext {
     pub(super) fn limit_default(&self, name: &str) -> Option<f64> {
         let (_, field) = Self::limit_field(name)?;
         match field {
-            "available" | "percentage" | "is_active" | "reset.unix" | "reset.seconds"
+            "available" | "percentage" | "is_active" | "stale" | "reset.unix" | "reset.seconds"
             | "reset.minutes" | "reset.hours" | "reset.days" => Some(0.0),
             "remaining" => Some(100.0),
             "display" => Some(
@@ -319,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn extra_limits_do_not_change_builtin_rendering_or_headlines() {
+    fn fable_only_expands_classic_main_surface_and_never_changes_headlines() {
         let plain_usage = UsageData {
             session: UsageSection {
                 available: true,
@@ -351,6 +352,14 @@ mod tests {
                         render_theme_surface_with_runtime(&theme, index, Some(&plain), runtime);
                     let after =
                         render_theme_surface_with_runtime(&theme, index, Some(&extra), runtime);
+                    if theme.id == CLASSIC_THEME_ID && index == 0 {
+                        assert_eq!(
+                            (after.width, after.height),
+                            (before.width + 114, before.height)
+                        );
+                        assert!(after.warnings.is_empty());
+                        continue;
+                    }
                     assert_eq!((before.width, before.height), (after.width, after.height));
                     assert_eq!(
                         before.pixels, after.pixels,

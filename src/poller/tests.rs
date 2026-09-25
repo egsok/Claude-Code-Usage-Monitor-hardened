@@ -1,5 +1,89 @@
 use super::*;
 
+#[test]
+fn provider_sources_cannot_launch_agents_or_copy_credentials() {
+    fn check(path: &std::path::Path) {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path).unwrap() {
+                check(&entry.unwrap().path());
+            }
+        } else if path.extension().and_then(|value| value.to_str()) == Some("rs")
+            && path.file_name().unwrap() != "tests.rs"
+        {
+            let source = std::fs::read_to_string(path).unwrap();
+            for line in source.lines().filter(|line| line.contains("Command::new(")) {
+                assert!(
+                    path.file_name().unwrap() == "claude.rs"
+                        && line.trim() == "Command::new(\"wsl.exe\")",
+                    "unapproved subprocess in {}: {line}",
+                    path.display()
+                );
+            }
+            for forbidden in [
+                "cli_refresh_",
+                "oauth2.googleapis.com/token",
+                "CredWrite",
+                "fs::copy(",
+                "powershell.exe",
+                "cmd.exe",
+                "send_form(",
+                ".arg(\"-lc\")",
+                ".arg(\"-lic\")",
+            ] {
+                assert!(
+                    !source.contains(forbidden),
+                    "forbidden provider authority {forbidden} in {}",
+                    path.display()
+                );
+            }
+        }
+    }
+    check(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/poller"));
+    check(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/poller.rs"));
+}
+
+#[test]
+fn model_limits_survive_header_fallback_but_authoritative_absence_clears_them() {
+    let previous = UsageData {
+        updated_at_unix: Some(100),
+        limits: vec![crate::models::UsageLimit {
+            key: "weekly_scoped_fable".into(),
+            model: Some("Fable".into()),
+            usage: UsageSection {
+                available: true,
+                percentage: 62.0,
+                resets_at: None,
+            },
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let mut fallback = UsageData {
+        limits_authoritative: false,
+        updated_at_unix: Some(200),
+        ..Default::default()
+    };
+    carry_model_limits(&mut fallback, &previous);
+    assert_eq!(fallback.limits[0].usage.percentage, 62.0);
+    assert!(fallback.limits[0].stale);
+    assert!(!fallback.stale, "fresh overall windows must remain fresh");
+    let cached: UsageData =
+        serde_json::from_str(&serde_json::to_string(&fallback).unwrap()).unwrap();
+    assert!(cached.limits[0].stale);
+    let mut overdue = cached.clone();
+    overdue.limits[0].usage.resets_at = Some(UNIX_EPOCH);
+    assert!(
+        !is_past_reset(&overdue),
+        "a stale optional quota must not start five-second network retries"
+    );
+    let mut authoritative = UsageData::default();
+    carry_model_limits(&mut authoritative, &cached);
+    assert!(
+        authoritative.limits.is_empty(),
+        "an authoritative omission removes the optional quota"
+    );
+}
+
 fn usage_with_session_percent(percentage: f64) -> UsageData {
     UsageData {
         limits: Vec::new(),
@@ -13,6 +97,7 @@ fn usage_with_session_percent(percentage: f64) -> UsageData {
         monthly: None,
         credits: None,
         stale: false,
+        ..Default::default()
     }
 }
 

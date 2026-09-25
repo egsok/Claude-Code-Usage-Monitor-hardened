@@ -49,6 +49,7 @@ pub(super) fn parse(entries: &[Value], legacy: &BTreeMap<String, Value>) -> Vec<
                     key.push_str(&stable_suffix(&scope.to_string()));
                 }
                 limits.push(UsageLimit {
+                    stale: false,
                     key,
                     kind: limit.kind,
                     label,
@@ -95,6 +96,7 @@ pub(super) fn parse(entries: &[Value], legacy: &BTreeMap<String, Value>) -> Vec<
             continue;
         }
         limits.push(UsageLimit {
+            stale: false,
             key: slug(key),
             kind: key.clone(),
             label: model.clone().unwrap_or_else(|| key.replace('_', " ")),

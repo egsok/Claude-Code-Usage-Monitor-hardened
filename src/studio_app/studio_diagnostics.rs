@@ -108,7 +108,7 @@ fn monitor_available(owner: isize) -> bool {
             return false;
         }
         let length = GetClassNameW(hwnd, &mut class_name).max(0) as usize;
-        String::from_utf16_lossy(&class_name[..length]) == "ClaudeCodeUsageMonitor"
+        String::from_utf16_lossy(&class_name[..length]) == "ClaudeCodeUsageMonitorHardenedUpstream2"
     }
 }
 

@@ -1,6 +1,9 @@
 use super::*;
 
 pub(super) fn position_at_taskbar() {
+    if managed::is_managed_index(0) {
+        return;
+    }
     let should_skip = {
         let state = lock_state();
         state.as_ref().is_some_and(|s| s.dragging || s.auto_ejected)
@@ -20,7 +23,7 @@ pub(super) fn position_at_taskbar() {
                     theme.canvas.width = width;
                     theme.canvas.height = height;
                     let scale = theme_surface_scale(&theme, 0);
-                    (s.hwnd.to_hwnd(), theme, scale)
+                    (s.surface_hwnd.to_hwnd(), theme, scale)
                 })
             } else {
                 None
@@ -53,7 +56,12 @@ pub(super) fn position_at_taskbar() {
             }
         };
 
-        (s.hwnd.to_hwnd(), s.embedded, s.tray_offset, taskbar_hwnd)
+        (
+            s.surface_hwnd.to_hwnd(),
+            s.embedded,
+            s.tray_offset,
+            taskbar_hwnd,
+        )
     };
 
     let taskbar_rect = match native_interop::get_taskbar_rect(taskbar_hwnd) {
@@ -343,7 +351,7 @@ pub(super) fn sync_theme_window_visibility() {
             theme,
             state.data.clone(),
             theme_runtime_from_state(state),
-            std::iter::once(state.hwnd)
+            std::iter::once(state.surface_hwnd)
                 .chain(state.mirror_hwnds.iter().copied())
                 .collect::<Vec<_>>(),
         )
@@ -354,7 +362,7 @@ pub(super) fn sync_theme_window_visibility() {
                 .placement
                 .nest
                 .resolve(surface.placement.reference.region);
-            if nest != SurfaceNest::Floating {
+            if managed::is_managed_index(surface_index) || nest != SurfaceNest::Floating {
                 continue;
             }
             let Some(regular_window) = windows.get(surface_index) else {
@@ -417,7 +425,11 @@ pub(super) fn foreground_is_fullscreen_on_display(display_index: usize) -> bool 
         let is_ours = {
             let state = lock_state();
             state.as_ref().is_some_and(|state| {
-                state.hwnd.to_hwnd() == foreground
+                state.surface_hwnd.to_hwnd() == foreground
+                    || state
+                        .managed_windows
+                        .iter()
+                        .any(|copy| copy.hwnd.to_hwnd() == foreground)
                     || state
                         .mirror_hwnds
                         .iter()
@@ -511,7 +523,12 @@ pub(super) fn record_primary_taskbar(
     taskbar: HWND,
     tray: Option<HWND>,
 ) -> bool {
-    if surface != state.hwnd.to_hwnd() {
+    let primary = state
+        .managed_windows
+        .first()
+        .map(|copy| copy.hwnd)
+        .unwrap_or(state.surface_hwnd);
+    if surface != primary.to_hwnd() {
         return false;
     }
     state.taskbar_hwnd = Some(SendHwnd::from_hwnd(taskbar));
@@ -543,7 +560,14 @@ pub(super) fn ensure_tray_event_hook_for_taskbar(surface: HWND, taskbar: HWND) {
     }
     if needed {
         // Secondary taskbars need events even when they have no TrayNotifyWnd.
-        let thread = native_interop::get_window_thread_id(taskbar);
+        let thread = if lock_state()
+            .as_ref()
+            .is_some_and(|s| !s.managed_windows.is_empty())
+        {
+            0 // Monitor every selected taskbar, including secondary Explorer threads.
+        } else {
+            native_interop::get_window_thread_id(taskbar)
+        };
         let hook = native_interop::set_tray_event_hook(thread, on_tray_location_changed);
         if let Some(state) = lock_state().as_mut() {
             state.win_event_hook = hook.map(SendWinEventHook::from_hook);
@@ -551,6 +575,7 @@ pub(super) fn ensure_tray_event_hook_for_taskbar(surface: HWND, taskbar: HWND) {
     }
 }
 
+#[cfg(test)]
 pub(super) fn rect_changed(previous: Option<RECT>, current: Option<RECT>) -> bool {
     match (previous, current) {
         (Some(p), Some(c)) => {
@@ -605,21 +630,30 @@ pub(super) unsafe extern "system" fn on_tray_location_changed(
         return;
     }
 
-    let (is_tray, our_hwnd) = {
+    let (tray, taskbar, our_hwnds, taskbars, our_hwnd) = {
         let state = lock_state();
         let Some(s) = state.as_ref() else {
             return;
         };
-        let our_hwnds = std::iter::once(s.hwnd.to_hwnd())
+        let our_hwnds = std::iter::once(s.surface_hwnd.to_hwnd())
             .chain(s.mirror_hwnds.iter().map(|h| h.to_hwnd()))
             .chain(s.desktop_hwnds.iter().flatten().map(|h| h.to_hwnd()))
+            .chain(s.managed_windows.iter().map(|copy| copy.hwnd.to_hwnd()))
             .collect::<Vec<_>>();
         let tray = s.tray_notify_hwnd.map(|h| h.to_hwnd());
         let taskbar = s.taskbar_hwnd.map(|h| h.to_hwnd());
-        let is_tray = is_tray_event_source(hwnd, tray, taskbar, &our_hwnds);
-        (is_tray, s.hwnd.to_hwnd())
+        let taskbars = s
+            .monitors
+            .iter()
+            .filter_map(|m| m.taskbar)
+            .collect::<Vec<_>>();
+        (tray, taskbar, our_hwnds, taskbars, s.hwnd.to_hwnd())
     };
 
+    let is_tray = is_tray_event_source(hwnd, tray, taskbar, &our_hwnds)
+        || taskbars
+            .iter()
+            .any(|bar| is_tray_event_source(hwnd, None, Some(bar.hwnd), &our_hwnds));
     if !is_tray {
         return;
     }
@@ -867,7 +901,10 @@ pub(super) fn surface_screen_rect(
         (placement.offset_y as f64 * scale).round() as i32,
     );
     let (x, y) = if placement.clamp_taskbar_drag
-        && placement.reference.region == ReferenceRegion::Taskbar
+        && matches!(
+            placement.reference.region,
+            ReferenceRegion::Taskbar | ReferenceRegion::SystemTray
+        )
         && placement.nest == SurfaceNest::Taskbar
     {
         if let Some(tb) = taskbar {

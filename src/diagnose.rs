@@ -57,7 +57,7 @@ impl DiagnoseState {
 static DIAGNOSE_STATE: DiagnoseState = DiagnoseState::new();
 
 pub fn log_path() -> PathBuf {
-    std::env::temp_dir().join("claude-code-usage-monitor.log")
+    std::env::temp_dir().join("claude-code-usage-monitor-hardened-upstream2.log")
 }
 
 /// Record panics even when diagnostic recording is disabled.

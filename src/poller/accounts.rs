@@ -26,6 +26,49 @@ impl Target {
     }
 }
 
+fn account_target(provider: ProviderId, profile: &AccountProfile) -> Target {
+    let path = profile.credential_path(provider).map(|path| {
+        path.or_else(|| match provider {
+            ProviderId::Codex => codex::codex_auth_path(),
+            ProviderId::Claude => crate::accounts::environment_directory(provider)
+                .map(|directory| directory.join(".credentials.json"))
+                .or_else(claude::native_credential_path),
+            _ => None,
+        })
+    });
+    Target {
+        provider,
+        profile: Some(profile.clone()),
+        path,
+    }
+}
+
+pub(super) fn default_account_source(provider: ProviderId) -> (Option<PathBuf>, String) {
+    let target = account_target(provider, &AccountProfile::default());
+    let signature = target.signature();
+    (target.path.ok().flatten(), signature)
+}
+
+pub(super) fn paused_credentials_changed(data: &AppUsageData) -> bool {
+    paused_credentials_changed_with(data, |account| {
+        account_target(account.provider, &account.profile).signature()
+    })
+}
+
+fn paused_credentials_changed_with(
+    data: &AppUsageData,
+    signature: impl Fn(&AccountUsage) -> String,
+) -> bool {
+    data.accounts
+        .iter()
+        .filter(|account| {
+            account
+                .error
+                .is_some_and(|error| error.is_auth() || error == PollError::NoCredentials)
+        })
+        .any(|account| signature(account) != account.source_signature)
+}
+
 pub(super) fn poll_accounts(
     enabled: ProviderSet,
     settings: &AccountSettings,
@@ -91,20 +134,7 @@ where
     for provider in enabled.iter() {
         if let Some(accounts) = settings.get(provider) {
             for profile in accounts.profiles.iter().filter(|profile| profile.enabled) {
-                let path = profile.credential_path(provider).map(|path| {
-                    path.or_else(|| match provider {
-                        ProviderId::Codex => codex::codex_auth_path(),
-                        ProviderId::Claude => crate::accounts::environment_directory(provider)
-                            .map(|directory| directory.join(".credentials.json"))
-                            .or_else(claude::native_credential_path),
-                        _ => None,
-                    })
-                });
-                targets.push(Target {
-                    provider,
-                    profile: Some(profile.clone()),
-                    path,
-                });
+                targets.push(account_target(provider, profile));
             }
         } else {
             targets.push(Target {
@@ -114,7 +144,7 @@ where
             });
         }
     }
-    // Profiles sharing a source must not race token refresh or credit writes.
+    // Profiles sharing a source must not race credit writes.
     // Each distinct source has one job, while unrelated accounts run concurrently.
     let mut groups: Vec<Vec<Target>> = Vec::new();
     for target in targets {
@@ -169,7 +199,7 @@ where
                 for _ in 0..if paused_error.is_some() { 0 } else { 2 } {
                     result = match &target.path {
                         Err(_) => Err(PollError::NoCredentials),
-                        Ok(path) => poll(target.provider, path.as_deref()),
+                        Ok(path) => poll(target.provider, path.as_deref()).map(stamp_success),
                     };
                     let current_signature = target.signature();
                     if signature == current_signature {
@@ -275,14 +305,6 @@ fn source_key(path: &Result<Option<PathBuf>, String>) -> String {
 
 pub(super) fn carry_accounts(fresh: &mut AppUsageData, previous: &AppUsageData) {
     for account in &mut fresh.accounts {
-        if account.usage.is_some() {
-            continue;
-        }
-        // Only transient failures may keep a reading, and only for the same
-        // configured source and unchanged credentials file.
-        if !account.error.is_some_and(PollError::is_transient) {
-            continue;
-        }
         if let Some(last) = previous
             .accounts
             .iter()
@@ -293,9 +315,17 @@ pub(super) fn carry_accounts(fresh: &mut AppUsageData, previous: &AppUsageData) 
             })
             .and_then(|last| last.usage.as_ref())
         {
-            let mut carried = last.clone();
-            carried.stale = true;
-            account.usage = Some(carried);
+            if let Some(current) = account.usage.as_mut() {
+                if account.provider == ProviderId::Claude {
+                    carry_model_limits(current, last);
+                }
+            } else if account.error.is_some() {
+                // A paused login keeps its last known reading too, but never
+                // borrows one from a changed source or another account.
+                let mut carried = last.clone();
+                carried.stale = true;
+                account.usage = Some(carried);
+            }
         }
     }
 }
@@ -417,7 +447,7 @@ mod tests {
         );
         for (error, changed, keeps_reading) in [
             (PollError::RequestFailed, false, true),
-            (PollError::AuthRequired, false, false),
+            (PollError::AuthRequired, false, true),
             (PollError::RequestFailed, true, false),
         ] {
             let mut failed = work.clone();
@@ -599,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_data_requires_the_same_profile_source_and_transient_error() {
+    fn stale_data_survives_transient_or_auth_errors_only_for_the_same_source() {
         let settings = settings();
         let previous =
             poll_accounts_with(ProviderSet::default(), &settings, |_, _| Ok(usage(42.0))).unwrap();
@@ -611,11 +641,13 @@ mod tests {
             (PollError::HttpStatus(503), false, false, true),
             (PollError::HttpStatus(429), true, false, false),
             (PollError::HttpStatus(429), false, true, false),
-            (PollError::HttpStatus(401), false, false, false),
-            (PollError::HttpStatus(403), false, false, false),
-            (PollError::AuthRequired, false, false, false),
-            (PollError::TokenExpired, false, false, false),
-            (PollError::NoCredentials, false, false, false),
+            (PollError::HttpStatus(401), false, false, true),
+            (PollError::HttpStatus(403), false, false, true),
+            (PollError::AuthRequired, false, false, true),
+            (PollError::TokenExpired, false, false, true),
+            (PollError::NoCredentials, false, false, true),
+            (PollError::AuthRequired, true, false, false),
+            (PollError::TokenExpired, false, true, false),
         ] {
             let mut fresh =
                 poll_accounts_with(ProviderSet::default(), &settings, |_, _| Err(error)).unwrap();
@@ -631,6 +663,147 @@ mod tests {
                 assert!(fresh.accounts[1].usage.as_ref().unwrap().stale);
             }
         }
+    }
+
+    #[test]
+    fn an_expired_account_keeps_its_timestamp_while_another_provider_updates() {
+        let settings = AccountSettings::default();
+        let enabled = ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Codex]);
+        let mut previous = poll_accounts_with(enabled, &settings, |_, _| Ok(usage(25.0))).unwrap();
+        for account in &mut previous.accounts {
+            account.usage.as_mut().unwrap().updated_at_unix = Some(123);
+        }
+        let fresh = poll_accounts_with_history(
+            enabled,
+            &settings,
+            Some(&previous),
+            false,
+            |provider, _| {
+                if provider == ProviderId::Claude {
+                    Err(PollError::TokenExpired)
+                } else {
+                    Ok(usage(70.0))
+                }
+            },
+        )
+        .unwrap();
+        let mut merged = carry_forward_failures(fresh, &previous, enabled);
+        merged.select_accounts(&settings);
+        let paused = merged
+            .get(ProviderId::Claude)
+            .expect("retain the expired account's last success");
+        assert_eq!(paused.session.percentage, 25.0);
+        assert_eq!(paused.updated_at_unix, Some(123));
+        assert!(paused.stale);
+        let active = merged.get(ProviderId::Codex).unwrap();
+        assert_eq!(active.session.percentage, 70.0);
+        assert!(active.updated_at_unix.unwrap() > 123);
+        assert!(!active.stale);
+        let mut requested = Vec::new();
+        let requested = std::sync::Mutex::new(&mut requested);
+        poll_accounts_with_history(enabled, &settings, Some(&merged), false, |provider, _| {
+            requested.lock().unwrap().push(provider);
+            Ok(usage(75.0))
+        })
+        .unwrap();
+        assert_eq!(
+            **requested.lock().unwrap(),
+            [ProviderId::Codex],
+            "unchanged expired Claude stays paused without blocking Codex"
+        );
+    }
+
+    #[test]
+    fn imported_default_sources_match_polling_and_survive_initial_failures() {
+        let settings = AccountSettings::default();
+        let enabled = ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Codex]);
+        let mut imported = AppUsageData::default();
+        for provider in enabled.iter() {
+            let (source_path, source_signature) = default_account_source(provider);
+            imported.accounts.push(AccountUsage {
+                provider,
+                profile: AccountProfile::default(),
+                source_path,
+                source_signature,
+                usage: Some(UsageData {
+                    updated_at_unix: Some(123),
+                    stale: true,
+                    ..usage(42.0)
+                }),
+                error: None,
+                selected: true,
+            });
+        }
+        imported.select_accounts(&settings);
+        let fresh =
+            poll_accounts_with_history(enabled, &settings, Some(&imported), false, |_, _| {
+                Err(PollError::NetworkError)
+            })
+            .unwrap();
+        let mut carried = carry_forward_failures(fresh, &imported, enabled);
+        carried.select_accounts(&settings);
+        for provider in enabled.iter() {
+            let reading = carried
+                .get(provider)
+                .expect("first failure must retain the default account's imported reading");
+            assert_eq!(reading.updated_at_unix, Some(123));
+            assert_eq!(reading.session.percentage, 42.0);
+        }
+    }
+
+    #[test]
+    fn transient_accounts_retry_shortly_without_marking_healthy_usage_stale() {
+        let settings = AccountSettings::default();
+        let enabled = ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Codex]);
+        for failed in [ProviderId::Claude, ProviderId::Codex] {
+            let data = poll_accounts_with(enabled, &settings, |provider, _| {
+                if provider == failed {
+                    Err(PollError::NetworkError)
+                } else {
+                    Ok(usage(75.0))
+                }
+            })
+            .unwrap();
+            assert_eq!(account_retry_delay_ms(&data, 1, 900_000), Some(30_000));
+            assert_eq!(account_retry_delay_ms(&data, 2, 900_000), Some(60_000));
+            assert_eq!(account_retry_delay_ms(&data, 99, 900_000), Some(900_000));
+            assert!(data
+                .iter()
+                .all(|(_, usage)| !usage.stale && usage.session.percentage == 75.0));
+            assert!(!has_paused_accounts(&data));
+        }
+    }
+
+    #[test]
+    fn paused_sources_only_request_a_poll_after_credentials_change() {
+        let settings = AccountSettings::default();
+        let enabled = ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Codex]);
+        let data = poll_accounts_with(enabled, &settings, |provider, _| {
+            if provider == ProviderId::Claude {
+                Err(PollError::TokenExpired)
+            } else {
+                Ok(usage(75.0))
+            }
+        })
+        .unwrap();
+        assert!(has_paused_accounts(&data));
+        assert_eq!(
+            account_retry_delay_ms(&data, 1, 900_000),
+            None,
+            "authentication cannot start a network retry loop"
+        );
+        assert!(!paused_credentials_changed_with(&data, |account| {
+            assert_eq!(
+                account.provider,
+                ProviderId::Claude,
+                "a healthy source must not be inspected by the auth watcher"
+            );
+            account.source_signature.clone()
+        }));
+        assert!(paused_credentials_changed_with(&data, |account| format!(
+            "{}-rotated",
+            account.source_signature
+        )));
     }
 
     #[test]

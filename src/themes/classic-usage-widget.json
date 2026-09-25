@@ -19,7 +19,7 @@
         "offset_x": 0,
         "offset_y": 0
       },
-      "width": "42 + providers.count * (ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 62) + max(0, providers.count - 1) * 3 + (providers.opencode.enabled + providers.cursor.enabled) * 28",
+      "width": "42 + providers.count * (ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82) + max(0, providers.count - 1) * 3 + (providers.opencode.enabled + providers.cursor.enabled) * 28 + providers.claude.enabled * claude.model.fable.available * 114",
       "height": "46",
       "mouse_events": {
         "right_click": "show_context_menu(\"classic-v1\")"
@@ -176,7 +176,7 @@
           "name": "Cursor provider",
           "render": "providers.cursor.enabled",
           "parent": "provider-row",
-          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 90",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 110",
           "height": "46"
         },
         {
@@ -425,7 +425,7 @@
           "name": "Claude Code provider",
           "render": "providers.claude.enabled",
           "parent": "provider-row",
-          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 62",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82 + claude.model.fable.available * 114",
           "height": "46"
         },
         {
@@ -459,7 +459,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "5",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -506,7 +506,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "5",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -553,7 +553,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -600,7 +600,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -621,7 +621,7 @@
           "name": "Codex provider",
           "render": "providers.codex.enabled",
           "parent": "provider-row",
-          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 62",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82",
           "height": "46"
         },
         {
@@ -655,7 +655,7 @@
           "parent": "codex-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "5",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -702,7 +702,7 @@
           "parent": "codex-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "5",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -749,7 +749,7 @@
           "parent": "codex-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -796,7 +796,7 @@
           "parent": "codex-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -817,7 +817,7 @@
           "name": "Antigravity provider",
           "render": "providers.antigravity.enabled",
           "parent": "provider-row",
-          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 62",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82",
           "height": "46"
         },
         {
@@ -851,7 +851,7 @@
           "parent": "antigravity-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "5",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -898,7 +898,7 @@
           "parent": "antigravity-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "5",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -945,7 +945,7 @@
           "parent": "antigravity-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -992,7 +992,7 @@
           "parent": "antigravity-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1013,7 +1013,7 @@
           "name": "OpenCode provider",
           "render": "providers.opencode.enabled",
           "parent": "provider-row",
-          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 90",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 110",
           "height": "46"
         },
         {
@@ -1047,7 +1047,7 @@
           "parent": "opencode-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "5",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1094,7 +1094,7 @@
           "parent": "opencode-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "5",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1237,7 +1237,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1287,7 +1287,7 @@
           "parent": "claude-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1337,7 +1337,7 @@
           "parent": "codex-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1387,7 +1387,7 @@
           "parent": "codex-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1409,7 +1409,7 @@
           "name": "Grok provider",
           "render": "providers.grok.enabled",
           "parent": "provider-row",
-          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 62",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82",
           "height": "46"
         },
         {
@@ -1443,7 +1443,7 @@
           "parent": "grok-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1490,7 +1490,7 @@
           "parent": "grok-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1539,7 +1539,7 @@
           "parent": "grok-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1589,7 +1589,7 @@
           "parent": "grok-provider",
           "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
           "y": "28",
-          "width": "62",
+          "width": "82",
           "height": "13",
           "content": {
             "type": "text",
@@ -1603,6 +1603,100 @@
             "color": {
               "color": "#C77700FF",
               "opacity": "1"
+            }
+          }
+        },
+        {
+          "id": "claude-fable-segments-dark",
+          "name": "dark Claude Fable weekly segments",
+          "parent": "claude-provider",
+          "render": "(system.dark) * claude.model.fable.available",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82 + 4",
+          "y": "28",
+          "width": "16",
+          "height": "13",
+          "content": {
+            "type": "progress",
+            "value": "claude.model.fable.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#F09A7AFF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 2,
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "claude-fable-value-dark",
+          "name": "dark Claude Fable weekly value",
+          "parent": "claude-provider",
+          "render": "(system.dark) * claude.model.fable.available",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82 + 4 + 20",
+          "y": "28",
+          "width": "90",
+          "height": "13",
+          "content": {
+            "type": "text",
+            "template": "F {claude.model.fable.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#F09A7AFF"
+            }
+          }
+        },
+        {
+          "id": "claude-fable-segments-light",
+          "name": "light Claude Fable weekly segments",
+          "parent": "claude-provider",
+          "render": "(1 - system.dark) * claude.model.fable.available",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82 + 4",
+          "y": "28",
+          "width": "16",
+          "height": "13",
+          "content": {
+            "type": "progress",
+            "value": "claude.model.fable.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#A94F32FF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 2,
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "claude-fable-value-light",
+          "name": "light Claude Fable weekly value",
+          "parent": "claude-provider",
+          "render": "(1 - system.dark) * claude.model.fable.available",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82 + 4 + 20",
+          "y": "28",
+          "width": "90",
+          "height": "13",
+          "content": {
+            "type": "text",
+            "template": "F {claude.model.fable.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "12",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#A94F32FF"
             }
           }
         }

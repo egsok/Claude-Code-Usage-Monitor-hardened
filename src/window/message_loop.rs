@@ -45,6 +45,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
         }
         WM_ERASEBKGND => LRESULT(1),
         WM_DISPLAYCHANGE | WM_DPICHANGED_MSG | WM_SETTINGCHANGE => {
+            managed::refresh_topology();
             refresh_theme_host_geometry();
             if msg == WM_DPICHANGED_MSG {
                 let new_dpi = (wparam.0 & 0xFFFF) as u32;
@@ -63,6 +64,17 @@ pub(super) unsafe extern "system" fn wnd_proc(
         WM_TIMER => {
             let timer_id = wparam.0;
             match timer_id {
+                TIMER_TOPOLOGY => {
+                    if lock_state()
+                        .as_ref()
+                        .is_some_and(|state| state.polling_enabled)
+                    {
+                        request_credential_watch(hwnd);
+                    }
+                    managed::refresh_topology();
+                    refresh_theme_host_geometry();
+                    render_layered();
+                }
                 TIMER_POLL => {
                     // Credential discovery can launch WSL and decrypt local
                     // caches. The poll worker also handles the paused state.
@@ -100,6 +112,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                 }
                 TIMER_WINDOW_STATE => {
                     sync_theme_window_visibility();
+                    managed::sync_visibility();
                 }
                 TIMER_MOUSE_CLICK => {
                     let _ = KillTimer(Some(hwnd), TIMER_MOUSE_CLICK);
@@ -854,7 +867,9 @@ pub(super) unsafe extern "system" fn wnd_proc(
             }
             match tray_icon::handle_message(lparam) {
                 tray_icon::TrayAction::OpenDashboard => {
-                    crate::dashboard::show(hwnd);
+                    if !managed::toggle_visible() {
+                        crate::dashboard::show(hwnd);
+                    }
                 }
                 tray_icon::TrayAction::ShowContextMenu => {
                     show_context_menu_document(hwnd, None, None);
@@ -864,6 +879,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         _ if msg == taskbar_created_message() => {
+            managed::refresh_topology();
             refresh_theme_host_geometry();
             // Explorer discards notification icons when it restarts. Floating
             // and tray-icon-only themes keep their owner HWND, so restore the
@@ -873,6 +889,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
+            managed::destroy_surfaces();
             crate::dashboard::close_existing();
             crate::desktop_compositor::clear();
             let (hook, desktop_windows) = {

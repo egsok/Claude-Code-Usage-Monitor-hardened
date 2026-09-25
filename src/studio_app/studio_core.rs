@@ -1,5 +1,65 @@
 use super::*;
 
+fn usage_cache_display_state(cache: &UsageCache) -> (bool, bool) {
+    // Match the widget: account snapshots and stale fallback readings remain
+    // visible during recovery, independently of the last network result.
+    let poll_ok = !cache.data.is_empty()
+        && (!cache.data.accounts.is_empty()
+            || cache.poll_ok
+            || cache.data.iter().any(|(_, usage)| usage.stale));
+    let has_error = !poll_ok
+        && (!cache.poll_ok
+            || cache
+                .data
+                .accounts
+                .iter()
+                .any(|account| account.error.is_some()));
+    (poll_ok, has_error)
+}
+
+pub(super) fn version_label() -> String {
+    // The experimental identity is in the window title; keep this narrow footer
+    // control the same width as upstream's three-component version.
+    format!("v{}", env!("CARGO_PKG_VERSION").split('-').next().unwrap())
+}
+
+/// Persist only edits made on this settings page. The monitor can change its
+/// placement, selection, interval and timestamps while Studio remains open.
+pub(super) fn save_edited_settings(
+    previous: &SettingsFile,
+    edited: &SettingsFile,
+) -> Result<SettingsFile, String> {
+    app_settings::update_settings(|current| {
+        if previous.poll_interval_ms != edited.poll_interval_ms {
+            current.poll_interval_ms = edited.poll_interval_ms;
+        }
+        if previous.language != edited.language {
+            current.language = edited.language.clone();
+        }
+        if previous.usage_countdown != edited.usage_countdown {
+            current.usage_countdown = edited.usage_countdown;
+        }
+        for provider in crate::providers::ProviderId::ALL {
+            if previous.provider_enabled(provider) != edited.provider_enabled(provider) {
+                current.set_provider_enabled(provider, edited.provider_enabled(provider));
+            }
+        }
+        if previous.accounts.claude != edited.accounts.claude {
+            current.accounts.claude = edited.accounts.claude.clone();
+        }
+        if previous.accounts.codex != edited.accounts.codex {
+            current.accounts.codex = edited.accounts.codex.clone();
+        }
+    })
+}
+
+fn save_active_theme(edited: &SettingsFile) -> Result<SettingsFile, String> {
+    app_settings::update_settings(|current| {
+        current.active_theme_path = edited.active_theme_path.clone();
+        current.custom_theme_enabled = true;
+    })
+}
+
 fn clock_refresh_delay(interval: Duration) -> Duration {
     let interval_ms = interval.as_millis().max(1);
     let elapsed_ms = SystemTime::now()
@@ -82,21 +142,14 @@ impl StudioApp {
             .and_then(|path| context_menu::load_context_menu(path).ok())
             .unwrap_or_else(context_menu::classic_context_menu);
         let usage_cache = app_settings::load_usage_cache().map(|mut cache| {
+            cache.data.invalidate_fallback_credentials();
             cache.data.select_accounts(&settings.accounts);
             cache
         });
-        let usage_poll_ok = usage_cache
+        let (usage_poll_ok, usage_has_error) = usage_cache
             .as_ref()
-            .is_some_and(|cache| cache.poll_ok && !cache.data.is_empty());
-        let usage_has_error = usage_cache.as_ref().is_some_and(|cache| {
-            !cache.poll_ok
-                || (cache.data.is_empty()
-                    && cache
-                        .data
-                        .accounts
-                        .iter()
-                        .any(|account| account.error.is_some()))
-        });
+            .map(usage_cache_display_state)
+            .unwrap_or_default();
         let usage = usage_cache.map(|cache| cache.data);
         let next_preview_countdown_refresh = preview_countdown_refresh_delay(usage.as_ref())
             .and_then(|delay| Instant::now().checked_add(delay));
@@ -202,10 +255,10 @@ impl StudioApp {
         self.synced_poll_interval_ms = persisted_interval;
     }
 
-    pub(super) fn save_settings(&mut self) {
-        self.sync_poll_interval(app_settings::load_settings().poll_interval_ms);
-        match app_settings::save_settings(&self.settings) {
-            Ok(()) => {
+    pub(super) fn save_settings(&mut self, previous: &SettingsFile) {
+        match save_edited_settings(previous, &self.settings) {
+            Ok(settings) => {
+                self.settings = settings;
                 self.synced_poll_interval_ms = self.settings.poll_interval_ms;
                 self.settings_error = None;
                 self.notify_owner();
@@ -244,7 +297,7 @@ impl StudioApp {
         self.settings.active_theme_path = Some(path.to_string_lossy().into_owned());
         self.settings.custom_theme_enabled = true;
         self.dirty = false;
-        if let Err(error) = app_settings::save_settings(&self.settings) {
+        if let Err(error) = save_active_theme(&self.settings) {
             self.theme_error = Some(format!(
                 "{}: {error}",
                 language.text("The theme was saved, but it could not be activated")
@@ -287,7 +340,7 @@ impl StudioApp {
         self.preview_mouse_overrides.clear();
         self.preview_hover_target = None;
         self.preview_pending_click = None;
-        if let Err(error) = app_settings::save_settings(&self.settings) {
+        if let Err(error) = save_active_theme(&self.settings) {
             self.theme_error = Some(format!(
                 "{}: {error}",
                 language.text("The theme could not be activated")
@@ -532,7 +585,6 @@ impl StudioApp {
         context: &egui::Context,
     ) {
         match action {
-            PendingUnsavedAction::Update { install } => self.send_update_action(install),
             PendingUnsavedAction::Close => {
                 context.send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -718,7 +770,7 @@ impl StudioApp {
         self.preview_hover_target = None;
         self.preview_pending_click = None;
         self.reset_history();
-        if let Err(error) = app_settings::save_settings(&self.settings) {
+        if let Err(error) = save_active_theme(&self.settings) {
             self.theme_error = Some(format!(
                 "The Classic theme was restored, but it could not be activated: {error}"
             ));
@@ -773,14 +825,7 @@ impl StudioApp {
 
     pub(super) fn update_usage_cache(&mut self, mut cache: UsageCache) -> bool {
         cache.data.select_accounts(&self.settings.accounts);
-        let poll_ok = cache.poll_ok && !cache.data.is_empty();
-        let has_error = !cache.poll_ok
-            || (cache.data.is_empty()
-                && cache
-                    .data
-                    .accounts
-                    .iter()
-                    .any(|account| account.error.is_some()));
+        let (poll_ok, has_error) = usage_cache_display_state(&cache);
         let changed = self.usage.as_ref() != Some(&cache.data)
             || self.usage_poll_ok != poll_ok
             || self.usage_has_error != has_error;
@@ -833,37 +878,17 @@ impl StudioApp {
     }
 
     pub(super) fn request_update_action(&mut self) {
-        if self.update_status.is_busy() || self.pending_unsaved_action.is_some() {
+        if self.update_status.is_busy() {
             return;
         }
-        let install = matches!(
-            self.update_status,
-            crate::dashboard::UpdateStatus::Available(_)
-        );
-        // The usual check can offer to install immediately. Resolve unsaved
-        // edits first so they cannot keep the dashboard executable locked.
-        if self.dirty {
-            self.pending_unsaved_action = Some(PendingUnsavedAction::Update { install });
-        } else {
-            self.send_update_action(install);
-        }
+        self.send_update_action();
     }
 
-    fn send_update_action(&mut self, install: bool) {
-        // A refresh click must still check and prompt even if an automatic
-        // check has found a release since the dashboard last read the status.
-        let message = if install {
-            native_interop::WM_APP_UPDATE_ACTION
-        } else {
-            native_interop::WM_APP_CHECK_FOR_UPDATES
-        };
+    fn send_update_action(&mut self) {
+        let message = native_interop::WM_APP_CHECK_FOR_UPDATES;
         match studio_diagnostics::send_owner_message(self.owner, message) {
             Ok(()) => {
-                self.update_status = if install {
-                    crate::dashboard::UpdateStatus::Applying
-                } else {
-                    crate::dashboard::UpdateStatus::Checking
-                };
+                self.update_status = crate::dashboard::UpdateStatus::Checking;
                 self.last_cache_read = Instant::now();
             }
             Err(error) => self.theme_error = Some(error),
@@ -875,18 +900,14 @@ impl StudioApp {
         let language = self.language();
         let (icon, tooltip) = match &self.update_status {
             UpdateStatus::Available(version) => (
-                LucideIcon::Download,
+                LucideIcon::Info,
                 language
-                    .text("Click to update to v{version}")
+                    .text("Release v{version} is available; updates are manual")
                     .replace("{version}", version),
             ),
             UpdateStatus::Checking => (
                 LucideIcon::RefreshCw,
                 language.strings().checking_for_updates.to_string(),
-            ),
-            UpdateStatus::Applying => (
-                LucideIcon::Download,
-                language.strings().applying_update.to_string(),
             ),
             UpdateStatus::Idle => (
                 LucideIcon::RefreshCw,
@@ -897,7 +918,7 @@ impl StudioApp {
             .scope(|ui| {
                 ui.add_enabled_ui(!self.update_status.is_busy(), |ui| {
                     let icon_id = ui.id().with("version-update-icon");
-                    let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+                    let version = version_label();
                     let background = ui.painter().add(egui::Shape::Noop);
                     let button = egui::AtomLayout::new((
                         egui::RichText::new(&version).size(16.0).color(muted()),

@@ -4,6 +4,7 @@ use crate::providers::ProviderId;
 impl StudioApp {
     pub(super) fn settings_page(&mut self, ui: &mut egui::Ui) {
         let language = self.language();
+        let previous_settings = self.settings.clone();
         let mut changed = false;
         let mut requested_theme = None;
         let mut open_theme_studio = false;
@@ -46,15 +47,13 @@ impl StudioApp {
                 setting_row(
                     ui,
                     language.text("Start with Windows"),
-                    language.text("Launch the monitor when you sign in"),
+                    language.text("Disabled in the experimental build"),
                     |ui| {
-                        if Toggle::new(&mut self.startup_enabled)
-                            .labels(language.text("Enabled"), language.text("Disabled"))
-                            .show(ui)
-                            .changed()
-                        {
-                            crate::window::set_startup_enabled(self.startup_enabled);
-                        }
+                        ui.add_enabled_ui(false, |ui| {
+                            Toggle::new(&mut self.startup_enabled)
+                                .labels(language.text("Enabled"), language.text("Disabled"))
+                                .show(ui);
+                        });
                     },
                 );
             });
@@ -184,7 +183,7 @@ impl StudioApp {
                 configure_style(ui.ctx(), new_language);
             }
             self.preview_dirty = true;
-            self.save_settings();
+            self.save_settings(&previous_settings);
         }
         if let Some(path) = requested_theme {
             self.request_activate_theme(path);

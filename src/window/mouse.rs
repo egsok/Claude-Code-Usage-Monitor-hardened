@@ -1,7 +1,14 @@
 use super::*;
 
 pub(super) fn surface_index_for_window(state: &AppState, hwnd: HWND) -> Option<usize> {
-    if state.hwnd.to_hwnd() == hwnd {
+    if let Some(copy) = state
+        .managed_windows
+        .iter()
+        .find(|copy| copy.hwnd.to_hwnd() == hwnd)
+    {
+        return Some(copy.surface_index);
+    }
+    if state.surface_hwnd.to_hwnd() == hwnd {
         return Some(0);
     }
     if let Some(index) = state
@@ -28,8 +35,21 @@ pub(super) fn mouse_target_at(hwnd: HWND, lparam: LPARAM) -> Option<(usize, Stri
     let state = lock_state();
     let state = state.as_ref()?;
     let surface_index = surface_index_for_window(state, hwnd)?;
-    let theme = effective_theme_from_state(state)?;
-    let scale = theme_surface_scale(&theme, surface_index).max(0.01);
+    let mut theme = effective_theme_from_state(state)?;
+    let copy = state
+        .managed_windows
+        .iter()
+        .find(|copy| copy.hwnd.to_hwnd() == hwnd);
+    if let Some(copy) = copy {
+        theme = managed::copy_theme(&theme, copy);
+    }
+    let scale = copy
+        .filter(|copy| copy.monitor_id.is_some())
+        .map_or_else(
+            || theme_surface_scale(&theme, surface_index),
+            |copy| copy.dpi as f64 / 96.0,
+        )
+        .max(0.01);
     let runtime = theme_runtime_for_surface(&theme, surface_index, theme_runtime_from_state(state));
     let (x, y) = mouse_client_point(lparam);
     let object_id = theme_engine::hit_test_mouse_event(
@@ -61,6 +81,15 @@ pub(super) fn dispatch_mouse_event(
     object_id: &str,
     event: MouseEventKind,
 ) -> bool {
+    dispatch_mouse_event_at(None, surface_index, object_id, event)
+}
+
+pub(super) fn dispatch_mouse_event_at(
+    menu_owner: Option<HWND>,
+    surface_index: usize,
+    object_id: &str,
+    event: MouseEventKind,
+) -> bool {
     let source = {
         let state = lock_state();
         let Some(state) = state.as_ref() else {
@@ -76,10 +105,19 @@ pub(super) fn dispatch_mouse_event(
         };
         source
     };
-    execute_mouse_action_source(surface_index, object_id, &source)
+    execute_mouse_action_source_at(menu_owner, surface_index, object_id, &source)
 }
 
 pub(super) fn execute_mouse_action_source(
+    surface_index: usize,
+    object_id: &str,
+    source: &str,
+) -> bool {
+    execute_mouse_action_source_at(None, surface_index, object_id, source)
+}
+
+fn execute_mouse_action_source_at(
+    menu_owner: Option<HWND>,
     surface_index: usize,
     object_id: &str,
     source: &str,
@@ -121,7 +159,7 @@ pub(super) fn execute_mouse_action_source(
                         open_web_url(owner, &url, "mouse action URL could not be opened")
                     }
                     MouseActionEffect::ShowContextMenu(menu) => show_context_menu_document(
-                        owner,
+                        menu_owner.unwrap_or(owner),
                         menu.as_deref(),
                         Some((surface_index, object_id.to_string())),
                     ),

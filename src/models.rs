@@ -55,7 +55,7 @@ pub struct CreditsSection {
     pub total: f64,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UsageData {
     pub session: UsageSection,
     pub weekly: UsageSection,
@@ -70,14 +70,41 @@ pub struct UsageData {
     /// Additional API quotas, exposed only through opt-in theme bindings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub limits: Vec<UsageLimit>,
+    /// Header probes cannot establish that model-specific quotas disappeared.
+    #[serde(default = "authoritative_limits")]
+    pub limits_authoritative: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at_unix: Option<u64>,
     /// True when this reading was carried over from an earlier poll because
     /// the provider failed this cycle. The figures are real, just not current.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stale: bool,
 }
 
+fn authoritative_limits() -> bool {
+    true
+}
+
+impl Default for UsageData {
+    fn default() -> Self {
+        Self {
+            session: UsageSection::default(),
+            weekly: UsageSection::default(),
+            weekly_label: None,
+            monthly: None,
+            credits: None,
+            limits: Vec::new(),
+            limits_authoritative: true,
+            updated_at_unix: None,
+            stale: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct UsageLimit {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stale: bool,
     pub key: String,
     pub kind: String,
     pub label: String,
@@ -102,11 +129,9 @@ impl UsageData {
 /// at that moment becomes what the gauge measures against until the next one.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CodexCreditsState {
-    /// Account whose balance this state belongs to. Older state files did not
-    /// record it and are deliberately re-seeded when an account ID is now
-    /// available, rather than risking a gauge based on another account.
+    /// SHA-256 account key. Provider account IDs never enter persisted state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub account_id: Option<String>,
+    pub account_key: Option<String>,
     /// Balance seen at the previous poll, in raw credits.
     pub balance: f64,
     /// Balance recorded at the last observed top-up, in raw credits. Seeded
@@ -254,7 +279,7 @@ impl AppUsageData {
     }
 
     /// A cached reading must not outlive a login change or a different inherited
-    /// config directory. This only stats files; it never starts a CLI or WSL.
+    /// config directory. Fast file checks are safe for repeated Studio reads.
     pub fn invalidate_changed_credentials(&mut self) {
         for account in &mut self.accounts {
             let expected = account
@@ -273,6 +298,22 @@ impl AppUsageData {
                 None => crate::accounts::environment_directory(account.provider).is_some(),
             };
             if changed {
+                account.usage = None;
+                account.error = None;
+                self.providers.remove(&account.provider);
+            }
+        }
+    }
+
+    /// Check fallback identity at startup; unlike ordinary cache reads this may
+    /// use the bounded WSL reader. Live polling and the auth watcher then track it.
+    pub fn invalidate_fallback_credentials(&mut self) {
+        for account in &mut self.accounts {
+            if account.source_path.is_some() {
+                continue;
+            }
+            let (path, signature) = crate::poller::default_account_source(account.provider);
+            if path.is_some() || signature != account.source_signature {
                 account.usage = None;
                 account.error = None;
                 self.providers.remove(&account.provider);

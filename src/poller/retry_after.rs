@@ -76,12 +76,20 @@ impl RetryAfter {
         request: Request<SendBody>,
         send: impl FnOnce(Request<SendBody>) -> Result<HttpResponse, ureq::Error>,
     ) -> Result<HttpResponse, ureq::Error> {
+        self.handle_at(request, Instant::now(), send)
+    }
+
+    fn handle_at(
+        &self,
+        request: Request<SendBody>,
+        now: Instant,
+        send: impl FnOnce(Request<SendBody>) -> Result<HttpResponse, ureq::Error>,
+    ) -> Result<HttpResponse, ureq::Error> {
         if request.extensions().get::<BypassCooldown>().is_some() {
             return send(request);
         }
         let key = request_key(&request);
         {
-            let now = Instant::now();
             let mut cooldowns = self.cooldowns.lock().unwrap_or_else(|e| e.into_inner());
             cooldowns.retain(|_, cooldown| !cooldown.remaining(now).is_zero());
             if let Some(cooldown) = cooldowns.get_mut(&key) {
@@ -236,15 +244,13 @@ mod tests {
                     Err(ureq::Error::StatusCode(code)) if code == status
                 ));
 
-                // Advance the cooldown's age without sleeping or restarting.
-                {
-                    let mut cooldowns = state.cooldowns.lock().unwrap();
-                    cooldowns.get_mut(&key).unwrap().received =
-                        Instant::now() - Duration::from_secs(86_400);
-                }
+                // Move the clock forward: subtracting a day can precede the
+                // Windows monotonic clock's origin on recently booted hosts.
+                let expired_at =
+                    state.cooldowns.lock().unwrap().get(&key).unwrap().received + MAX_RETRY_AFTER;
                 let mut sent = false;
                 state
-                    .handle(request("first"), |_| {
+                    .handle_at(request("first"), expired_at, |_| {
                         sent = true;
                         Ok(response(200, None))
                     })

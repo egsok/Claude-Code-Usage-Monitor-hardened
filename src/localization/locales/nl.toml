@@ -63,6 +63,11 @@ cursor_window_title = "Cursor-gebruiksmonitor"
 grok_window_title = "Grok-gebruiksmonitor"
 
 [translations]
+"Disabled in the experimental build" = "Disabled in the experimental build"
+"Release v{version} is available; updates are manual" = "Release v{version} is available; updates are manual"
+"Monitors" = "Monitors"
+"Monitors: theme has no taskbar surface" = "Monitors: theme has no taskbar surface"
+"Reset position" = "Reset position"
 "Absolute value" = "Absolute waarde"
 "Action" = "Action"
 "Actions run from top to bottom in one update." = "Acties worden van boven naar beneden in één update uitgevoerd."

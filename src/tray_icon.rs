@@ -305,7 +305,7 @@ fn copy_wide<const N: usize>(value: &str, buffer: &mut [u16; N]) {
 }
 
 fn copy_to_tip(value: &str, tooltip: &mut [u16; 128]) {
-    copy_wide(value, tooltip);
+    copy_wide(&format!("[Hardened v2 EXP] {value}"), tooltip);
 }
 
 #[cfg(test)]

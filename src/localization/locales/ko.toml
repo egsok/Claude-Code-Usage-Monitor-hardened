@@ -65,6 +65,11 @@ cursor_window_title = "Cursor 사용량 모니터"
 grok_window_title = "Grok 사용량 모니터"
 
 [translations]
+"Disabled in the experimental build" = "Disabled in the experimental build"
+"Release v{version} is available; updates are manual" = "Release v{version} is available; updates are manual"
+"Monitors" = "Monitors"
+"Monitors: theme has no taskbar surface" = "Monitors: theme has no taskbar surface"
+"Reset position" = "Reset position"
 "Absolute value" = "절댓값"
 "Action" = "Action"
 "Actions run from top to bottom in one update." = "작업은 한 번의 업데이트에서 위에서 아래로 실행됩니다."

@@ -1,7 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use serde::Deserialize;
 
@@ -37,7 +37,7 @@ struct CursorPlanUsage {
 }
 
 pub(super) fn poll_cursor() -> Result<UsageData, PollError> {
-    let cookie = read_cursor_session_cookie().ok_or_else(|| {
+    let cookie = read_cursor_session_cookie()?.ok_or_else(|| {
         diagnose::log(
             "Cursor usage poll failed: no Cursor session found (sign in to Cursor or set CURSOR_SESSION_TOKEN)",
         );
@@ -58,13 +58,13 @@ pub(super) fn credential_watch_snapshot(_all_sources: bool) -> Vec<String> {
 
 /// Resolve a Cursor dashboard session cookie. An explicit environment value
 /// takes priority over the access token persisted by Cursor itself.
-fn read_cursor_session_cookie() -> Option<String> {
+fn read_cursor_session_cookie() -> Result<Option<String>, PollError> {
     if let Some(token) = non_empty_environment(CURSOR_SESSION_TOKEN_ENV) {
-        return normalize_cursor_session_cookie(&token);
+        return Ok(normalize_cursor_session_cookie(&token));
     }
 
-    let access_token = read_cursor_access_token_from_state_db()?;
-    cursor_cookie_from_access_token(&access_token)
+    Ok(read_cursor_access_token_from_state_db()?
+        .and_then(|access_token| cursor_cookie_from_access_token(&access_token)))
 }
 
 fn normalize_cursor_session_cookie(token: &str) -> Option<String> {
@@ -141,39 +141,21 @@ fn cursor_state_db_path() -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-fn read_cursor_access_token_from_state_db() -> Option<String> {
-    let path = cursor_state_db_path()?;
-    match query_cursor_access_token(&path) {
-        Ok(token) => token,
-        Err(error) => {
-            diagnose::log(format!(
-                "Cursor state DB direct read failed ({error}); retrying via temp copy"
-            ));
-            query_cursor_access_token_from_copy(&path)
-        }
-    }
+fn read_cursor_access_token_from_state_db() -> Result<Option<String>, PollError> {
+    let Some(path) = cursor_state_db_path() else {
+        return Ok(None);
+    };
+    read_cursor_access_token_at(&path)
 }
 
-fn query_cursor_access_token_from_copy(path: &Path) -> Option<String> {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let temporary = std::env::temp_dir().join(format!(
-        "claude-monitor-cursor-state-{}-{unique}.vscdb",
-        std::process::id()
-    ));
-    if let Err(error) = std::fs::copy(path, &temporary) {
-        diagnose::log(format!("Cursor state DB temp copy failed: {error}"));
-        return None;
-    }
-    let result = query_cursor_access_token(&temporary);
-    let _ = std::fs::remove_file(&temporary);
-    match result {
-        Ok(token) => token,
+fn read_cursor_access_token_at(path: &Path) -> Result<Option<String>, PollError> {
+    match query_cursor_access_token(path) {
+        Ok(token) => Ok(token),
         Err(error) => {
-            diagnose::log(format!("Cursor state DB temp-copy read failed: {error}"));
-            None
+            diagnose::log(format!(
+                "Cursor state DB read failed ({error}); waiting for Cursor"
+            ));
+            Err(PollError::RequestFailed)
         }
     }
 }
@@ -235,6 +217,7 @@ fn cursor_usage_from_summary(response: CursorUsageSummaryResponse) -> Option<Usa
         monthly: None,
         credits: None,
         stale: false,
+        ..UsageData::default()
     })
 }
 
@@ -273,6 +256,22 @@ fn path_signature(kind: &str, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreadable_database_is_retryable_and_never_copied() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("state.vscdb");
+        std::fs::write(&path, "unavailable database fixture").unwrap();
+        assert_eq!(
+            read_cursor_access_token_at(&path),
+            Err(PollError::RequestFailed)
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "unavailable database fixture"
+        );
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
 
     #[test]
     fn extracts_cursor_user_id_from_a_jwt() {

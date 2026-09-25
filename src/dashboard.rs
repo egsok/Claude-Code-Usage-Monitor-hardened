@@ -15,9 +15,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MB_OK, SW_RESTORE, WM_CLOSE,
 };
 
-const DASHBOARD_TITLE: &str = "Usage Monitor";
-const DASHBOARD_MUTEX: &str = "Local\\ClaudeCodeUsageMonitorDashboard";
-const DASHBOARD_REQUEST_EVENT: &str = "Local\\ClaudeCodeUsageMonitorOpenDashboard";
+pub(crate) const DASHBOARD_TITLE: &str = "Usage Monitor — Hardened v2 Experiment";
+const DASHBOARD_MUTEX: &str = "Local\\ClaudeCodeUsageMonitorHardenedUpstream2Dashboard";
+const DASHBOARD_REQUEST_EVENT: &str = "Local\\ClaudeCodeUsageMonitorHardenedUpstream2OpenDashboard";
 
 /// Display-only snapshot shared with the dashboard process. The monitor keeps
 /// the authoritative release descriptor and chooses the installation channel.
@@ -26,13 +26,12 @@ pub(crate) enum UpdateStatus {
     #[default]
     Idle,
     Checking,
-    Applying,
     Available(String),
 }
 
 impl UpdateStatus {
     pub(crate) fn is_busy(&self) -> bool {
-        matches!(self, Self::Checking | Self::Applying)
+        matches!(self, Self::Checking)
     }
 }
 
