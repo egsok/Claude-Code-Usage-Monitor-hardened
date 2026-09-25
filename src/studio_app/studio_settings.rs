@@ -101,6 +101,18 @@ impl StudioApp {
             section(ui, language.text("Display"), |ui| {
                 setting_row(
                     ui,
+                    language.text("Auto-move above taskbar"),
+                    language.text("Move widgets above the taskbar when buttons overlap. Turning this off may cover buttons."),
+                    |ui| {
+                        changed |= Toggle::new(&mut self.settings.taskbar_auto_eject)
+                            .labels(language.text("Enabled"), language.text("Disabled"))
+                            .show(ui)
+                            .changed();
+                    },
+                );
+                setting_separator(ui);
+                setting_row(
+                    ui,
                     language.text("Usage direction"),
                     language.text("Count down what is left in supported themes"),
                     |ui| {

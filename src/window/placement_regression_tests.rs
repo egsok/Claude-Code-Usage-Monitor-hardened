@@ -39,6 +39,7 @@ fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> AppState {
         drag_start_origin: POINT::default(),
         drag_start_client_x: 0,
         auto_ejected: false,
+        taskbar_auto_eject: true,
         auto_ejected_origin: None,
         auto_ejected_host: None,
         is_switching_window_style: false,
@@ -111,6 +112,24 @@ fn floating_layout_survives_restart_repeated_drags_and_auto_ejection() {
         .placement
         .host_dimensions
         .is_none());
+}
+
+#[test]
+fn disabling_auto_eject_requests_redock_without_a_shell_sample_and_preserves_placement() {
+    let mut theme = ThemeDocument::starter();
+    theme.surfaces[0].placement.nest = SurfaceNest::Floating;
+    let mut state = state_for(theme, placement("taskbar"));
+    state.taskbar_auto_eject = false;
+    // A background save can finish with an older persistence baseline after
+    // Studio reloads the policy. That must not re-enable runtime movement.
+    assert!(state.observed_settings.taskbar_auto_eject);
+    let saved = state.placement_override.clone();
+    assert_eq!(taskbar_collision_action(&state), None);
+    state.auto_ejected = true;
+    assert_eq!(taskbar_collision_action(&state), Some(0));
+    assert_eq!(state.placement_override, saved);
+    state.dragging = true;
+    assert_eq!(taskbar_collision_action(&state), None);
 }
 
 #[test]

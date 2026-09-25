@@ -5,7 +5,7 @@
 - Upstream tag: v2.15.14, commit `814ff7339f70ac8234f4a8177dd2b061dc2235fa`.
 - Hardened behavior reference: v1.7.0, commit `bea4ab9`.
 - Branch: `agent/upstream-v2-hardened-experiment`.
-- Application version: `2.15.14-hardened.1`.
+- Application version: `2.15.14-hardened.2`.
 - Keep the upstream native renderer, Studio, themes, account profiles and providers.
 - Apply selected-monitor copies to the first authored taskbar root. Additional
   roots retain their authored behavior. With no taskbar root, copies are unavailable
@@ -106,7 +106,7 @@ Controlled restarts with only experimental settings changed confirmed:
 - A custom theme without a taskbar root creates no managed copies and retains
   monitor selections and positions.
 
-The final release is 7,396,864 bytes (7.40 MB), versus 923,648 bytes (0.92 MB) for
+The initial hardened.1 release is 7,396,864 bytes (7.40 MB), versus 923,648 bytes (0.92 MB) for
 the installed v1.7.0. Its final launch again received both providers (including
 Fable in the cache), created one Floating surface and recorded one initial poll.
 This size comparison is not a CPU or memory benchmark.
@@ -156,7 +156,40 @@ Both selected monitor copies were created; monitor settings and positions matche
 the pre-change snapshot, and the v1 settings hash remained unchanged.
 
 The final spacing pass passed two focused native renderer/geometry checks,
-including text fitting at 100–200% scaling. The collision policy is unchanged:
-this upstream version has no setting to disable automatic taskbar ejection;
-exposing one requires a code change. A narrower theme alone does not guarantee
-that a saved position is free of taskbar buttons.
+including text fitting at 100–200% scaling. The theme change alone retained the
+collision policy: this upstream version had no setting to disable automatic
+taskbar ejection. A narrower theme alone does not guarantee that a saved position
+is free of taskbar buttons.
+
+## Optional automatic taskbar movement
+
+Version `2.15.14-hardened.2` adds **Settings → Display → Auto-move above taskbar**
+(**Настройки → Отображение → Автоперенос над панелью**). It defaults to enabled
+for existing and new profiles; the user's experimental profile has it disabled.
+The persisted field is `taskbar_auto_eject`.
+
+Disabling it keeps all selected copies inside their taskbars even when buttons
+overlap, and immediately re-docks an already ejected copy at its saved position.
+Buttons may be covered when space is tight. Manual Floating remains independent;
+monitor selection, DIP offsets and temporary fallback rules are unchanged.
+Studio saves only the edited policy field. Runtime state is separate from the
+persistence baseline so a concurrent background save cannot restore an old value.
+
+Validation passed 439 regular tests and all three separately executed environment
+tests, plus formatting, strict Clippy and diff checks. New regressions cover
+default/round-trip behavior, crowded and unavailable occupancy samples, restoration,
+and stale Studio/monitor saves preserving the policy and monitor positions.
+
+A temporary isolated profile placed the primary copy over occupied taskbar space,
+which produced a real ejected window. Changing the setting while the process ran
+returned that same HWND to `Shell_TrayWnd`; all three copies were taskbar children,
+within the respective panel rectangles, with their saved positions unchanged.
+The real profile was then started with the setting disabled, and all three copies
+were again verified inside their taskbars. Its theme, monitor positions, and the
+stable v1 executable/settings hashes were preserved. This checks native parents
+and geometry, without capturing other applications on the desktop.
+
+The updated release is 7,398,912 bytes. Local evidence and the previous executable
+backup are under `target/upstream-v2-validation/auto-eject-runtime`; normal and live
+test logs are `auto-eject-tests.log` and `auto-eject-live-tests.log`. No publication,
+Explorer restart or change to Windows settings was needed.

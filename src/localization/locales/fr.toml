@@ -63,6 +63,8 @@ cursor_window_title = "Moniteur d'utilisation Cursor"
 grok_window_title = "Moniteur d'utilisation Grok"
 
 [translations]
+"Auto-move above taskbar" = "Auto-move above taskbar"
+"Move widgets above the taskbar when buttons overlap. Turning this off may cover buttons." = "Move widgets above the taskbar when buttons overlap. Turning this off may cover buttons."
 "Disabled in the experimental build" = "Disabled in the experimental build"
 "Release v{version} is available; updates are manual" = "Release v{version} is available; updates are manual"
 "Monitors" = "Monitors"

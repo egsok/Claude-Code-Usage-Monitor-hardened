@@ -35,6 +35,8 @@ pub struct SettingsFile {
     pub monitors: Vec<crate::monitors::MonitorSetting>,
     #[serde(default = "default_true")]
     pub monitor_widget_visible: bool,
+    #[serde(default = "default_true")]
+    pub taskbar_auto_eject: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub monitor_placement: Option<PlacementOverride>,
     #[serde(default)]
@@ -120,6 +122,7 @@ impl Default for SettingsFile {
             settings_schema_version: settings_schema_version(),
             monitors: Vec::new(),
             monitor_widget_visible: true,
+            taskbar_auto_eject: true,
             monitor_placement: Some(initial_floating_placement()),
             accounts: Default::default(),
             tray_offset: 0,
@@ -812,6 +815,21 @@ mod tests {
         let counting_down = decode_settings(r#"{"usage_countdown":true}"#).unwrap();
         assert!(counting_down.usage_countdown);
         assert_eq!(settings_json(&counting_down)["usage_countdown"], true);
+    }
+
+    #[test]
+    fn taskbar_auto_eject_preserves_old_behavior_until_explicitly_disabled() {
+        assert!(SettingsFile::default().taskbar_auto_eject);
+        let old_profile = decode_settings(r#"{"poll_interval_ms":900000}"#).unwrap();
+        assert!(old_profile.taskbar_auto_eject);
+        for enabled in [false, true] {
+            let mut settings = old_profile.clone();
+            settings.taskbar_auto_eject = enabled;
+            let json = settings_json(&settings);
+            assert_eq!(json["taskbar_auto_eject"], enabled);
+            let restored = decode_settings(&json.to_string()).unwrap();
+            assert_eq!(restored.taskbar_auto_eject, enabled);
+        }
     }
 
     #[test]

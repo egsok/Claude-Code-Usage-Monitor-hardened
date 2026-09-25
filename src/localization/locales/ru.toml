@@ -63,6 +63,8 @@ cursor_window_title = "Монитор использования Cursor"
 grok_window_title = "Монитор использования Grok"
 
 [translations]
+"Auto-move above taskbar" = "Автоперенос над панелью"
+"Move widgets above the taskbar when buttons overlap. Turning this off may cover buttons." = "Переносить виджеты над панелью задач, если они перекрывают кнопки. Если отключить, виджеты могут закрывать кнопки."
 "Disabled in the experimental build" = "Отключено в экспериментальной сборке"
 "Release v{version} is available; updates are manual" = "Доступна версия {version}; обновление вручную"
 "Monitors" = "Мониторы"

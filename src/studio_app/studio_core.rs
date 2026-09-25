@@ -39,6 +39,9 @@ pub(super) fn save_edited_settings(
         if previous.usage_countdown != edited.usage_countdown {
             current.usage_countdown = edited.usage_countdown;
         }
+        if previous.taskbar_auto_eject != edited.taskbar_auto_eject {
+            current.taskbar_auto_eject = edited.taskbar_auto_eject;
+        }
         for provider in crate::providers::ProviderId::ALL {
             if previous.provider_enabled(provider) != edited.provider_enabled(provider) {
                 current.set_provider_enabled(provider, edited.provider_enabled(provider));

@@ -125,6 +125,7 @@ struct AppState {
     drag_start_origin: POINT,
     drag_start_client_x: i32,
     auto_ejected: bool,
+    taskbar_auto_eject: bool,
     auto_ejected_origin: Option<POINT>,
     auto_ejected_host: Option<app_settings::FloatingHost>,
     is_switching_window_style: bool,
@@ -388,13 +389,18 @@ fn taskbar_collision_action(state: &AppState) -> Option<usize> {
     {
         return None;
     }
+    let auto_eject = state.taskbar_auto_eject;
+    if !auto_eject {
+        return state.auto_ejected.then_some(0);
+    }
     let taskbar = state.taskbar_hwnd?.to_hwnd();
     let bounds = native_interop::get_taskbar_rect(taskbar)?;
-    let occupancy = taskbar_collision::cached(taskbar, bounds)?;
+    let occupancy = taskbar_collision::cached(taskbar, bounds);
     if state.auto_ejected {
         let target = restored_dock_rect(state, taskbar, bounds)?;
         let margin = (20.0 * CURRENT_DPI.load(Ordering::Relaxed) as f64 / 96.0).round() as i32;
-        occupancy.can_restore(target, margin).then_some(0)
+        (!taskbar_collision::should_eject(auto_eject, true, occupancy.as_ref(), target, margin))
+            .then_some(0)
     } else if state.embedded
         && state
             .placement_override
@@ -402,7 +408,8 @@ fn taskbar_collision_action(state: &AppState) -> Option<usize> {
             .is_none_or(|p| p.nest != "floating")
     {
         let widget = native_interop::get_window_rect_safe(state.surface_hwnd.to_hwnd())?;
-        occupancy.overlaps_app_controls(widget).then_some(1)
+        taskbar_collision::should_eject(auto_eject, false, occupancy.as_ref(), widget, 0)
+            .then_some(1)
     } else {
         None
     }
@@ -1881,6 +1888,7 @@ pub fn run() {
                 drag_start_origin: POINT::default(),
                 drag_start_client_x: 0,
                 auto_ejected: false,
+                taskbar_auto_eject: settings.taskbar_auto_eject,
                 auto_ejected_origin: None,
                 auto_ejected_host: None,
                 is_switching_window_style: false,
@@ -2674,6 +2682,7 @@ fn reload_external_settings(hwnd: HWND) {
         state.poll_interval_ms = settings.poll_interval_ms;
         state.providers = settings.enabled_providers();
         state.usage_countdown = settings.usage_countdown;
+        state.taskbar_auto_eject = settings.taskbar_auto_eject;
         state.taskbar_index = settings.taskbar_index;
         state.tray_offset = settings.tray_offset;
         state.placement_override = settings.placement_override;

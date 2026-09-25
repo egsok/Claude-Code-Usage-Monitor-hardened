@@ -332,12 +332,16 @@ pub(super) fn copy_theme(theme: &ThemeDocument, copy: &ManagedWindow) -> ThemeDo
 }
 
 pub(super) fn render(theme: &ThemeDocument, data: Option<&AppUsageData>, runtime: ThemeRuntime) {
-    let (copies, visible) = {
+    let (copies, visible, auto_eject) = {
         let state = lock_state();
         let Some(s) = state.as_ref() else {
             return;
         };
-        (s.managed_windows.clone(), s.managed_visible)
+        (
+            s.managed_windows.clone(),
+            s.managed_visible,
+            s.taskbar_auto_eject,
+        )
     };
     for copy in copies {
         let hwnd = copy.hwnd.to_hwnd();
@@ -368,7 +372,7 @@ pub(super) fn render(theme: &ThemeDocument, data: Option<&AppUsageData>, runtime
         let offsets = theme_engine::resolve_surface_placement(&view, index, data, runtime);
         positioned.placement.offset_x = offsets.offset_x;
         positioned.placement.offset_y = offsets.offset_y;
-        let ejected = position_around_collisions(&copy, &positioned, scale);
+        let ejected = position_around_collisions(&copy, &positioned, scale, auto_eject);
         if !ejected {
             position_custom_theme(hwnd, &positioned, scale);
         }
@@ -386,6 +390,7 @@ fn position_around_collisions(
     copy: &ManagedWindow,
     positioned: &ThemeDocument,
     scale: f64,
+    auto_eject: bool,
 ) -> bool {
     let Some(parent) = copy.parent else {
         return false;
@@ -410,14 +415,13 @@ fn position_around_collisions(
         Some(bar),
         tray,
     );
-    let ejected =
-        taskbar_collision::cached(parent.to_hwnd(), bar).map_or(copy.auto_ejected, |occupancy| {
-            if copy.auto_ejected {
-                !occupancy.can_restore(dock, monitors::scale(20, copy.dpi))
-            } else {
-                occupancy.overlaps_app_controls(dock)
-            }
-        });
+    let ejected = taskbar_collision::should_eject(
+        auto_eject,
+        copy.auto_ejected,
+        taskbar_collision::cached(parent.to_hwnd(), bar).as_ref(),
+        dock,
+        monitors::scale(20, copy.dpi),
+    );
     if ejected != copy.auto_ejected {
         if let Some(s) = lock_state().as_mut() {
             if let Some(current) = s
@@ -945,6 +949,7 @@ mod tests {
         let mut on_disk = observed.clone();
         on_disk.poll_interval_ms = POLL_1_MIN;
         on_disk.language = Some("ru".into());
+        on_disk.taskbar_auto_eject = false;
         on_disk.active_theme_path = Some("new-theme.json".into());
         let mut desired = observed.clone();
         desired.monitors = vec![MonitorSetting {
@@ -956,6 +961,7 @@ mod tests {
         merge_settings_edits(&mut on_disk, &observed, &desired);
         assert_eq!(on_disk.poll_interval_ms, POLL_1_MIN);
         assert_eq!(on_disk.language.as_deref(), Some("ru"));
+        assert!(!on_disk.taskbar_auto_eject);
         assert_eq!(on_disk.active_theme_path.as_deref(), Some("new-theme.json"));
         assert_eq!(on_disk.monitors, desired.monitors);
     }

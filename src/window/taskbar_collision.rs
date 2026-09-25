@@ -16,6 +16,25 @@ pub(super) struct Occupancy {
     pub reserved: Vec<RECT>,
 }
 
+/// Missing shell samples retain the runtime state only while automatic movement
+/// is enabled. Disabling it always restores the saved dock, even if still busy.
+pub(super) fn should_eject(
+    enabled: bool,
+    already_ejected: bool,
+    occupancy: Option<&Occupancy>,
+    dock: RECT,
+    margin: i32,
+) -> bool {
+    enabled
+        && occupancy.map_or(already_ejected, |sample| {
+            if already_ejected {
+                !sample.can_restore(dock, margin)
+            } else {
+                sample.overlaps_app_controls(dock)
+            }
+        })
+}
+
 fn intersection(a: RECT, b: RECT) -> Option<RECT> {
     let rect = RECT {
         left: a.left.max(b.left),
@@ -350,6 +369,25 @@ mod tests {
             occupied,
             reserved: Vec::new(),
         }
+    }
+
+    #[test]
+    fn disabling_auto_eject_keeps_and_restores_copies_despite_busy_or_unknown_taskbars() {
+        let dock = rect(10, 2, 454, 71);
+        let busy = layout(rect(0, 0, 3840, 72), vec![rect(383, 0, 600, 72)]);
+        let clear = layout(rect(0, 0, 3840, 72), vec![rect(533, 0, 750, 72)]);
+        for previous in [false, true] {
+            for sample in [Some(&busy), Some(&clear), None] {
+                assert!(!should_eject(false, previous, sample, dock, 30));
+            }
+            assert!(should_eject(true, previous, Some(&busy), dock, 30));
+            assert!(!should_eject(true, previous, Some(&clear), dock, 30));
+            assert_eq!(should_eject(true, previous, None, dock, 30), previous);
+        }
+        let near = layout(rect(0, 0, 3840, 72), vec![rect(470, 0, 700, 72)]);
+        assert!(!should_eject(true, false, Some(&near), dock, 30));
+        assert!(should_eject(true, true, Some(&near), dock, 30));
+        assert!(!should_eject(false, true, Some(&near), dock, 30));
     }
 
     #[test]

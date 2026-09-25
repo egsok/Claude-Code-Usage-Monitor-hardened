@@ -532,6 +532,49 @@ fn preview_render_scale_bounds_monitor_sized_themes_to_the_viewport() {
 }
 
 #[test]
+fn studio_auto_eject_edit_preserves_positions_and_survives_unrelated_stale_edits() {
+    let previous = SettingsFile::default();
+    let positions = vec![
+        crate::monitors::MonitorSetting {
+            id: "display-left".into(),
+            name: "Left".into(),
+            enabled: true,
+            offset_dip: 42,
+        },
+        crate::monitors::MonitorSetting {
+            id: "display-disconnected".into(),
+            name: "Disconnected".into(),
+            enabled: true,
+            offset_dip: 180,
+        },
+    ];
+    app_settings::update_settings(|settings| {
+        settings.monitors = positions.clone();
+        settings.taskbar_auto_eject = true;
+    })
+    .unwrap();
+
+    let mut edited = previous.clone();
+    edited.taskbar_auto_eject = false;
+    let persisted = studio_core::save_edited_settings(&previous, &edited).unwrap();
+    assert!(!persisted.taskbar_auto_eject);
+    assert_eq!(persisted.monitors, positions);
+    assert!(!app_settings::load_settings().taskbar_auto_eject);
+
+    // Another Studio still has the original enabled value. Its countdown edit
+    // must preserve the newer disabled policy and every monitor's position.
+    let mut stale_edited = previous.clone();
+    stale_edited.usage_countdown = true;
+    let persisted = studio_core::save_edited_settings(&previous, &stale_edited).unwrap();
+    assert!(!persisted.taskbar_auto_eject);
+    assert!(persisted.usage_countdown);
+    assert_eq!(persisted.monitors, positions);
+    let reloaded = app_settings::load_settings();
+    assert!(!reloaded.taskbar_auto_eject);
+    assert_eq!(reloaded.monitors, positions);
+}
+
+#[test]
 fn preview_render_mailbox_keeps_only_the_latest_request() {
     let request = |generation| PreviewRenderRequest {
         generation,
