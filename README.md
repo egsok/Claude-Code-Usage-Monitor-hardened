@@ -2,12 +2,15 @@
 
 This branch experiments with upstream v2.15.14 plus the hardened fork's passive
 provider polling, resilient cached usage, Fable display and independently positioned
-monitor copies. It is a separate local application, not an upgrade of the installed v1.7.
+monitor copies. It uses a separate application directory and profile; `main`
+remains on stable v1.7.0 while this branch is tried in daily use.
 
 **Start here:** [experiment notes, build and validation](docs/UPSTREAM-V2-EXPERIMENT.md).
-The experiment never starts provider agent CLIs, refreshes OAuth tokens, installs
-updates. Windows startup is opt-in and uses a separate v2 registration. Upstream installation/update
-instructions below do not apply to this experimental build.
+The current build is `2.15.14-hardened.3`, with opt-in Windows startup, a compact
+three-row Claude theme and a switch for automatic movement above the taskbar.
+The experiment never starts provider agent CLIs, refreshes OAuth tokens, or installs
+updates. Windows startup uses a separate v2 registration. Upstream installation
+and update instructions below do not apply to this experimental build.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

@@ -1,5 +1,24 @@
 # Hardened upstream v2 experiment
 
+## Current status — 2026-09-25
+
+The session is complete. `2.15.14-hardened.3` is installed for daily testing, with
+its own Windows startup enabled and the old v1 startup disabled. The v1 executable
+and profile are preserved. The active compact theme is 296 × 46 logical pixels;
+Claude uses three rows, Codex uses two, and automatic taskbar ejection is disabled.
+All three selected taskbar copies retain their independent positions.
+
+The latest implementation is commit `be3f706`. The experimental branch is pushed
+to the hardened repository. Stable `main` and `agent/multi-monitor-widgets` remain
+at `bea4ab9` (v1.7.0); the experiment has not been merged into `main`. No tag or
+GitHub Release was published.
+
+Latest validation passed **441 regular tests plus all three explicitly run live
+tests (444 total)**, formatting, strict Clippy, diff checks and the release build.
+The installed executable matches the build. Actual startup after signing in to
+Windows and the remaining manual checks below are still pending. The sections
+below retain the validation history for each earlier stage.
+
 ## Identity and scope
 
 - Upstream tag: v2.15.14, commit `814ff7339f70ac8234f4a8177dd2b061dc2235fa`.
@@ -41,10 +60,11 @@ on first launch. Import rejects the live v1 directory and an already populated
 experimental profile. It keeps byte-exact backups inside the experiment and never
 copies provider credentials. A completed import is not repeated.
 
-Close only the experiment to return to v1.7. Daily use can install this build into
+Daily use can install this build into
 `%LOCALAPPDATA%\Programs\ClaudeCodeUsageMonitorHardenedUpstream2` and enable its own
 startup entry. Keep the v1 executable separate; avoid enabling both versions at
-login. No public release is implied.
+login. See the rollback steps below before switching back. No public release is
+implied.
 
 ## Deliberate differences from upstream
 
@@ -75,7 +95,7 @@ login. No public release is implied.
 Device identity is not guaranteed across port or driver changes. Floating means
 one managed primary widget; additional authored theme windows are unaffected.
 
-## Validation record
+## Initial port validation — hardened.1
 
 Before porting, the v1.7 baseline passed 43 tests, with none skipped.
 The unmodified upstream baseline compiled with Rust 1.95.0: 447 passed, one failed,
@@ -84,7 +104,7 @@ past its representable origin; the experimental test advances a simulated clock.
 The three ignored upstream tests require live Claude Desktop credentials/requests
 or the desktop taskbar accessibility tree.
 
-The final integrated suite passed 435 regular tests. All three environment-dependent
+The initial port's integrated suite passed 435 regular tests. All three environment-dependent
 tests were then run explicitly and passed: 438 tested, zero failures, none left
 unexecuted. The suite is different from upstream: tests for removed CLI/updater
 paths were removed, and hardened behavior gained regression coverage.
@@ -119,7 +139,8 @@ unchanged; the startup registration and original v1 process were unchanged too.
 All three imported backup files matched the snapshots byte for byte. The new
 Codex credits file contained a 64-character SHA-256 key and no raw account ID.
 The initial validation left the experiment running with Studio and Floating.
-Implementation commit: `5383c32`. Nothing was pushed, tagged or installed.
+Implementation commit: `5383c32`. At that stage, nothing had been pushed, tagged or
+installed; later publication and daily installation are recorded above and below.
 
 These are process/log/configuration checks on the real desktop, not a complete
 visual acceptance test. Screenshot validation was curtailed because another
@@ -194,8 +215,8 @@ and geometry, without capturing other applications on the desktop.
 
 The updated release is 7,398,912 bytes. Local evidence and the previous executable
 backup are under `target/upstream-v2-validation/auto-eject-runtime`; normal and live
-test logs are `auto-eject-tests.log` and `auto-eject-live-tests.log`. No publication,
-Explorer restart or change to Windows settings was needed.
+test logs are `auto-eject-tests.log` and `auto-eject-live-tests.log`. This step did
+not publish a release, restart Explorer or change Windows settings.
 
 ## Daily installation and login startup
 
@@ -230,3 +251,26 @@ Run value matches its quoted installed path. Both providers returned fresh data,
 all three native windows remained inside their taskbars, and positions were unchanged.
 Windows sign-out/reboot was not performed. Local evidence, previous executable and
 startup/settings snapshots are in `target/upstream-v2-validation/daily-install`.
+
+## Remaining acceptance checks and rollback
+
+Daily use is the next step; there is no unfinished implementation or active blocker
+from this session. These checks are not authorization to interrupt the desktop:
+
+- Confirm that a normal Windows sign-in starts only the installed v2 monitor,
+  with the saved theme, positions and startup setting intact.
+- Complete a manual Studio, menu, dragging, Floating/Taskbar and hide/show pass.
+- Separately agree and test physical monitor disconnection/reconnection, display
+  layout/DPI changes and recovery after a real Explorer restart. The existing
+  synthetic and native-window checks do not replace those hardware/shell tests.
+
+If a rollback is requested, disable v2's **Start with Windows**, exit its monitor
+and Studio, then launch the preserved
+`%LOCALAPPDATA%\Programs\ClaudeCodeUsageMonitor\claude-code-usage-monitor.exe`
+and enable startup in v1. Keep the profiles separate; do not copy v2 settings into
+v1 or repeat the completed v1 import. No rollback was performed in this session.
+
+Promoting v2 to `main` is a later user decision after daily testing. The branches
+have diverged, so adoption needs integration and verification before merging;
+force-replacing `main` is not the planned path. Release packaging, migration and
+any tag/GitHub Release also require a separate decision.
