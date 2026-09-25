@@ -1,0 +1,3079 @@
+{
+  "schema_version": 1,
+  "id": "hardened-claude-three-rows",
+  "name": "Hardened Compact · 3 rows",
+  "surfaces": [
+    {
+      "id": "main",
+      "name": "Classic taskbar widget",
+      "placement": {
+        "reference": {
+          "region": "system_tray",
+          "display": 0
+        },
+        "nest": "taskbar",
+        "horizontal": "left",
+        "vertical": "bottom",
+        "surface_horizontal": "right",
+        "surface_vertical": "bottom",
+        "offset_x": 0,
+        "offset_y": 0
+      },
+      "width": "42 + providers.count * (ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82) + max(0, providers.count - 1) * 3 + (providers.opencode.enabled + providers.cursor.enabled) * 28 - providers.codex.enabled * (82 - (if(codex.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))))",
+      "height": "46",
+      "mouse_events": {
+        "right_click": "show_context_menu(\"classic-v1\")"
+      },
+      "children": [
+        {
+          "id": "divider-dark-left",
+          "name": "Dark divider left",
+          "render": "system.dark",
+          "y": "10",
+          "width": "2",
+          "height": "25",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#505050FF"
+            }
+          }
+        },
+        {
+          "id": "divider-dark-right",
+          "name": "Dark divider right",
+          "render": "system.dark",
+          "x": "2",
+          "y": "10",
+          "width": "1",
+          "height": "25",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#282828FF"
+            }
+          }
+        },
+        {
+          "id": "divider-light-left",
+          "name": "Light divider left",
+          "render": "1 - system.dark",
+          "y": "10",
+          "width": "2",
+          "height": "25",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#A0A0A0FF"
+            }
+          }
+        },
+        {
+          "id": "divider-light-right",
+          "name": "Light divider right",
+          "render": "1 - system.dark",
+          "x": "2",
+          "y": "10",
+          "width": "1",
+          "height": "25",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#E6E6E6FF"
+            }
+          }
+        },
+        {
+          "id": "session-label-dark",
+          "name": "dark 5-hour label",
+          "render": "system.dark",
+          "x": "13",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "18",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{i18n.session_window}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#888888FF"
+            }
+          }
+        },
+        {
+          "id": "weekly-label-dark",
+          "name": "dark 7-day label",
+          "render": "system.dark * (1 - providers.opencode.enabled)",
+          "x": "13",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "18",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{i18n.weekly_window}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#888888FF"
+            }
+          }
+        },
+        {
+          "id": "session-label-light",
+          "name": "light 5-hour label",
+          "render": "1 - system.dark",
+          "x": "13",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "18",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{i18n.session_window}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#404040FF"
+            }
+          }
+        },
+        {
+          "id": "weekly-label-light",
+          "name": "light 7-day label",
+          "render": "(1 - system.dark) * (1 - providers.opencode.enabled)",
+          "x": "13",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "18",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{i18n.weekly_window}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#404040FF"
+            }
+          }
+        },
+        {
+          "id": "cursor-provider",
+          "name": "Cursor provider",
+          "render": "providers.cursor.enabled",
+          "parent": "provider-row",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 110",
+          "height": "46"
+        },
+        {
+          "id": "cursor-session-segments-dark",
+          "name": "dark Cursor Auto segments",
+          "render": "system.dark",
+          "parent": "cursor-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "cursor.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#F5F5F5FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "cursor-session-value-dark",
+          "name": "dark Cursor Auto value",
+          "render": "system.dark",
+          "parent": "cursor-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "90",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{i18n.cursor_auto_window} {cursor.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#E0E0E0FF"
+            }
+          }
+        },
+        {
+          "id": "cursor-session-segments-light",
+          "name": "light Cursor Auto segments",
+          "render": "1 - system.dark",
+          "parent": "cursor-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "cursor.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#1A1A1AFF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "cursor-session-value-light",
+          "name": "light Cursor Auto value",
+          "render": "1 - system.dark",
+          "parent": "cursor-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "90",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{i18n.cursor_auto_window} {cursor.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1A1A1AFF"
+            }
+          }
+        },
+        {
+          "id": "cursor-weekly-segments-dark",
+          "name": "dark Cursor API segments",
+          "render": "system.dark",
+          "parent": "cursor-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "cursor.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#F5F5F5FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "cursor-weekly-value-dark",
+          "name": "dark Cursor API value",
+          "render": "system.dark",
+          "parent": "cursor-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "90",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{i18n.cursor_api_window} {cursor.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#E0E0E0FF"
+            }
+          }
+        },
+        {
+          "id": "cursor-weekly-segments-light",
+          "name": "light Cursor API segments",
+          "render": "1 - system.dark",
+          "parent": "cursor-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "cursor.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#1A1A1AFF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "cursor-weekly-value-light",
+          "name": "light Cursor API value",
+          "render": "1 - system.dark",
+          "parent": "cursor-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "90",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{i18n.cursor_api_window} {cursor.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1A1A1AFF"
+            }
+          }
+        },
+        {
+          "id": "opencode-long-label-dark",
+          "name": "dark OpenCode 7-day or 30-day label",
+          "render": "system.dark * providers.opencode.enabled",
+          "x": "8",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "30",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "7/30d",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#888888FF"
+            }
+          }
+        },
+        {
+          "id": "opencode-long-label-light",
+          "name": "light OpenCode 7-day or 30-day label",
+          "render": "(1 - system.dark) * providers.opencode.enabled",
+          "x": "8",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "30",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "7/30d",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#404040FF"
+            }
+          }
+        },
+        {
+          "id": "provider-row",
+          "name": "Enabled providers",
+          "x": "41",
+          "width": "canvas.width - 42",
+          "height": "46",
+          "layout": "row",
+          "gap": "3"
+        },
+        {
+          "id": "claude-provider",
+          "name": "Claude Code provider",
+          "render": "providers.claude.enabled",
+          "parent": "provider-row",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82",
+          "height": "46"
+        },
+        {
+          "id": "claude-session-segments-dark",
+          "name": "dark Claude Code 5-hour segments",
+          "render": "system.dark",
+          "parent": "claude-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "claude.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#D97757FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "claude-session-value-dark",
+          "name": "dark Claude Code 5-hour value",
+          "render": "system.dark",
+          "parent": "claude-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{claude.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#F09A7AFF"
+            }
+          }
+        },
+        {
+          "id": "claude-session-segments-light",
+          "name": "light Claude Code 5-hour segments",
+          "render": "1 - system.dark",
+          "parent": "claude-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "claude.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#D97757FF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "claude-session-value-light",
+          "name": "light Claude Code 5-hour value",
+          "render": "1 - system.dark",
+          "parent": "claude-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{claude.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#A94F32FF"
+            }
+          }
+        },
+        {
+          "id": "claude-weekly-segments-dark",
+          "name": "dark Claude Code 7-day segments",
+          "render": "system.dark",
+          "parent": "claude-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "claude.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#D97757FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "claude-weekly-value-dark",
+          "name": "dark Claude Code 7-day value",
+          "render": "(system.dark) && !claude.credits.available",
+          "parent": "claude-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{claude.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#F09A7AFF"
+            }
+          }
+        },
+        {
+          "id": "claude-weekly-segments-light",
+          "name": "light Claude Code 7-day segments",
+          "render": "1 - system.dark",
+          "parent": "claude-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "claude.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#D97757FF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "claude-weekly-value-light",
+          "name": "light Claude Code 7-day value",
+          "render": "(1 - system.dark) && !claude.credits.available",
+          "parent": "claude-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{claude.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#A94F32FF"
+            }
+          }
+        },
+        {
+          "id": "codex-provider",
+          "name": "Codex provider",
+          "render": "providers.codex.enabled",
+          "parent": "provider-row",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + if(codex.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
+          "height": "46"
+        },
+        {
+          "id": "codex-session-segments-dark",
+          "name": "dark Codex 5-hour segments",
+          "render": "system.dark",
+          "parent": "codex-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "codex.five_hour.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#F5F5F5FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "codex-session-value-dark",
+          "name": "dark Codex 5-hour value",
+          "render": "system.dark",
+          "parent": "codex-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "if(codex.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{codex.five_hour.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#F5F5F5FF"
+            }
+          }
+        },
+        {
+          "id": "codex-session-segments-light",
+          "name": "light Codex 5-hour segments",
+          "render": "1 - system.dark",
+          "parent": "codex-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "codex.five_hour.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#1F1F1FFF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "codex-session-value-light",
+          "name": "light Codex 5-hour value",
+          "render": "1 - system.dark",
+          "parent": "codex-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "if(codex.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{codex.five_hour.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1F1F1FFF"
+            }
+          }
+        },
+        {
+          "id": "codex-weekly-segments-dark",
+          "name": "dark Codex 7-day segments",
+          "render": "system.dark",
+          "parent": "codex-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "codex.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#F5F5F5FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "codex-weekly-value-dark",
+          "name": "dark Codex 7-day value",
+          "render": "(system.dark) && !codex.credits.available",
+          "parent": "codex-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "if(codex.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{codex.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#F5F5F5FF"
+            }
+          }
+        },
+        {
+          "id": "codex-weekly-segments-light",
+          "name": "light Codex 7-day segments",
+          "render": "1 - system.dark",
+          "parent": "codex-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "codex.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#1F1F1FFF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "codex-weekly-value-light",
+          "name": "light Codex 7-day value",
+          "render": "(1 - system.dark) && !codex.credits.available",
+          "parent": "codex-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "if(codex.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{codex.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1F1F1FFF"
+            }
+          }
+        },
+        {
+          "id": "antigravity-provider",
+          "name": "Antigravity provider",
+          "render": "providers.antigravity.enabled",
+          "parent": "provider-row",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82",
+          "height": "46"
+        },
+        {
+          "id": "antigravity-session-segments-dark",
+          "name": "dark Antigravity 5-hour segments",
+          "render": "system.dark",
+          "parent": "antigravity-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#4285F4FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-session-value-dark",
+          "name": "dark Antigravity 5-hour value",
+          "render": "system.dark",
+          "parent": "antigravity-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#8AB4F8FF"
+            }
+          }
+        },
+        {
+          "id": "antigravity-session-segments-light",
+          "name": "light Antigravity 5-hour segments",
+          "render": "1 - system.dark",
+          "parent": "antigravity-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#4285F4FF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-session-value-light",
+          "name": "light Antigravity 5-hour value",
+          "render": "1 - system.dark",
+          "parent": "antigravity-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1967D2FF"
+            }
+          }
+        },
+        {
+          "id": "antigravity-weekly-segments-dark",
+          "name": "dark Antigravity 7-day segments",
+          "render": "system.dark",
+          "parent": "antigravity-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#4285F4FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-weekly-value-dark",
+          "name": "dark Antigravity 7-day value",
+          "render": "system.dark",
+          "parent": "antigravity-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#8AB4F8FF"
+            }
+          }
+        },
+        {
+          "id": "antigravity-weekly-segments-light",
+          "name": "light Antigravity 7-day segments",
+          "render": "1 - system.dark",
+          "parent": "antigravity-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "antigravity.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#4285F4FF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "antigravity-weekly-value-light",
+          "name": "light Antigravity 7-day value",
+          "render": "1 - system.dark",
+          "parent": "antigravity-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1967D2FF"
+            }
+          }
+        },
+        {
+          "id": "opencode-provider",
+          "name": "OpenCode provider",
+          "render": "providers.opencode.enabled",
+          "parent": "provider-row",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 110",
+          "height": "46"
+        },
+        {
+          "id": "opencode-session-segments-dark",
+          "name": "dark OpenCode 5-hour segments",
+          "render": "system.dark",
+          "parent": "opencode-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "opencode.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#4CAF50FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "opencode-session-value-dark",
+          "name": "dark OpenCode 5-hour value",
+          "render": "system.dark",
+          "parent": "opencode-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{opencode.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#81C784FF"
+            }
+          }
+        },
+        {
+          "id": "opencode-session-segments-light",
+          "name": "light OpenCode 5-hour segments",
+          "render": "1 - system.dark",
+          "parent": "opencode-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "opencode.session.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#2E7D32FF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "opencode-session-value-light",
+          "name": "light OpenCode 5-hour value",
+          "render": "1 - system.dark",
+          "parent": "opencode-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 1, 5)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{opencode.session.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1B5E20FF"
+            }
+          }
+        },
+        {
+          "id": "opencode-weekly-segments-dark",
+          "name": "dark OpenCode long-window segments",
+          "render": "system.dark",
+          "parent": "opencode-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "opencode.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#4CAF50FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "opencode-weekly-value-dark",
+          "name": "dark OpenCode long-window value",
+          "render": "system.dark",
+          "parent": "opencode-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "90",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{opencode.weekly.label} {opencode.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#81C784FF"
+            }
+          }
+        },
+        {
+          "id": "opencode-weekly-segments-light",
+          "name": "light OpenCode long-window segments",
+          "render": "1 - system.dark",
+          "parent": "opencode-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "opencode.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#2E7D32FF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "opencode-weekly-value-light",
+          "name": "light OpenCode long-window value",
+          "render": "1 - system.dark",
+          "parent": "opencode-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "90",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{opencode.weekly.label} {opencode.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1B5E20FF"
+            }
+          }
+        },
+        {
+          "id": "claude-credits-segments-dark",
+          "name": "dark claude credit overlay",
+          "render": "(system.dark) && claude.credits.available",
+          "parent": "claude-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "claude.credits.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#F5A623FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#00000000",
+              "opacity": "0"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "claude-credits-value-dark",
+          "name": "dark claude credit balance",
+          "render": "(system.dark) && claude.credits.available",
+          "parent": "claude-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "${claude.credits.balance:0.00}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#F5A623FF",
+              "opacity": "1"
+            }
+          }
+        },
+        {
+          "id": "claude-credits-segments-light",
+          "name": "light claude credit overlay",
+          "render": "(1 - system.dark) && claude.credits.available",
+          "parent": "claude-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "claude.credits.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#C77700FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#00000000",
+              "opacity": "0"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "claude-credits-value-light",
+          "name": "light claude credit balance",
+          "render": "(1 - system.dark) && claude.credits.available",
+          "parent": "claude-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "${claude.credits.balance:0.00}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#C77700FF",
+              "opacity": "1"
+            }
+          }
+        },
+        {
+          "id": "codex-credits-segments-dark",
+          "name": "dark codex credit overlay",
+          "render": "(system.dark) && codex.credits.available",
+          "parent": "codex-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "codex.credits.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#F5A623FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#00000000",
+              "opacity": "0"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "codex-credits-value-dark",
+          "name": "dark codex credit balance",
+          "render": "(system.dark) && codex.credits.available",
+          "parent": "codex-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "if(codex.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "${codex.credits.balance:0.00}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#F5A623FF",
+              "opacity": "1"
+            }
+          }
+        },
+        {
+          "id": "codex-credits-segments-light",
+          "name": "light codex credit overlay",
+          "render": "(1 - system.dark) && codex.credits.available",
+          "parent": "codex-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "codex.credits.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#C77700FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#00000000",
+              "opacity": "0"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "codex-credits-value-light",
+          "name": "light codex credit balance",
+          "render": "(1 - system.dark) && codex.credits.available",
+          "parent": "codex-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "if(codex.credits.available, 82, if((providers.claude.enabled && claude.model.fable.available), 68, 74))",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "${codex.credits.balance:0.00}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#C77700FF",
+              "opacity": "1"
+            }
+          }
+        },
+        {
+          "id": "grok-provider",
+          "name": "Grok provider",
+          "render": "providers.grok.enabled",
+          "parent": "provider-row",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4 + 82",
+          "height": "46"
+        },
+        {
+          "id": "grok-pool-segments-dark",
+          "name": "dark Grok pool segments",
+          "render": "system.dark",
+          "parent": "grok-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "grok.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#8B5CF6FF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "grok-pool-value-dark",
+          "name": "dark Grok pool value",
+          "render": "(system.dark) && !grok.credits.available",
+          "parent": "grok-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{grok.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#F5F5F5FF"
+            }
+          }
+        },
+        {
+          "id": "grok-pool-segments-light",
+          "name": "light Grok pool segments",
+          "render": "1 - system.dark",
+          "parent": "grok-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "grok.weekly.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#7C3AEDFF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "grok-pool-value-light",
+          "name": "light Grok pool value",
+          "render": "(1 - system.dark) && !grok.credits.available",
+          "parent": "grok-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "{grok.weekly.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#1F1F1FFF"
+            }
+          }
+        },
+        {
+          "id": "grok-credits-segments-dark",
+          "name": "dark Grok on-demand segments",
+          "render": "(system.dark) && grok.credits.available",
+          "parent": "grok-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "grok.credits.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#F5A623FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#00000000",
+              "opacity": "0"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "grok-credits-value-dark",
+          "name": "dark Grok on-demand value",
+          "render": "(system.dark) && grok.credits.available",
+          "parent": "grok-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "${grok.credits.balance:0.00}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#F5A623FF",
+              "opacity": "1"
+            }
+          }
+        },
+        {
+          "id": "grok-credits-segments-light",
+          "name": "light Grok on-demand segments",
+          "render": "(1 - system.dark) && grok.credits.available",
+          "parent": "grok-provider",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "progress",
+            "value": "grok.credits.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#C77700FF",
+              "opacity": "1"
+            },
+            "track": {
+              "color": "#00000000",
+              "opacity": "0"
+            },
+            "corner_radius": "2",
+            "segments": 10,
+            "segments_expression": "ceil(10 / max(1, providers.count))",
+            "segment_gap": "1"
+          }
+        },
+        {
+          "id": "grok-credits-value-light",
+          "name": "light Grok on-demand value",
+          "render": "(1 - system.dark) && grok.credits.available",
+          "parent": "grok-provider",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "if((providers.claude.enabled && claude.model.fable.available), 16, 28)",
+          "width": "82",
+          "height": "if((providers.claude.enabled && claude.model.fable.available), 12, 13)",
+          "content": {
+            "type": "text",
+            "template": "${grok.credits.balance:0.00}",
+            "font_family": "Segoe UI",
+            "font_size": "if((providers.claude.enabled && claude.model.fable.available), 11, 12)",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#C77700FF",
+              "opacity": "1"
+            }
+          }
+        },
+        {
+          "id": "claude-fable-segments-dark",
+          "name": "dark Claude Fable weekly segments",
+          "parent": "claude-provider",
+          "render": "(system.dark) * (providers.claude.enabled && claude.model.fable.available)",
+          "x": "0",
+          "y": "31",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "12",
+          "content": {
+            "type": "progress",
+            "value": "claude.model.fable.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#F09A7AFF"
+            },
+            "track": {
+              "color": "#444444FF"
+            },
+            "corner_radius": "2",
+            "segments": 2,
+            "segment_gap": "1",
+            "segments_expression": "ceil(10 / max(1, providers.count))"
+          }
+        },
+        {
+          "id": "claude-fable-value-dark",
+          "name": "dark Claude Fable weekly value",
+          "parent": "claude-provider",
+          "render": "(system.dark) * (providers.claude.enabled && claude.model.fable.available)",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "31",
+          "width": "82",
+          "height": "12",
+          "content": {
+            "type": "text",
+            "template": "{claude.model.fable.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#F09A7AFF"
+            }
+          }
+        },
+        {
+          "id": "claude-fable-segments-light",
+          "name": "light Claude Fable weekly segments",
+          "parent": "claude-provider",
+          "render": "(1 - system.dark) * (providers.claude.enabled && claude.model.fable.available)",
+          "x": "0",
+          "y": "31",
+          "width": "ceil(10 / max(1, providers.count)) * 11 - 1",
+          "height": "12",
+          "content": {
+            "type": "progress",
+            "value": "claude.model.fable.display",
+            "direction": "left_to_right",
+            "fill": {
+              "color": "#A94F32FF"
+            },
+            "track": {
+              "color": "#AAAAAAFF"
+            },
+            "corner_radius": "2",
+            "segments": 2,
+            "segment_gap": "1",
+            "segments_expression": "ceil(10 / max(1, providers.count))"
+          }
+        },
+        {
+          "id": "claude-fable-value-light",
+          "name": "light Claude Fable weekly value",
+          "parent": "claude-provider",
+          "render": "(1 - system.dark) * (providers.claude.enabled && claude.model.fable.available)",
+          "x": "ceil(10 / max(1, providers.count)) * 11 - 1 + 4",
+          "y": "31",
+          "width": "82",
+          "height": "12",
+          "content": {
+            "type": "text",
+            "template": "{claude.model.fable.display:usage_line}",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#A94F32FF"
+            }
+          }
+        },
+        {
+          "id": "fable-label-dark",
+          "name": "dark Fable row label",
+          "render": "(system.dark * (1 - providers.opencode.enabled)) && providers.claude.enabled && (providers.claude.enabled && claude.model.fable.available)",
+          "x": "13",
+          "y": "31",
+          "width": "18",
+          "height": "12",
+          "content": {
+            "type": "text",
+            "template": "F",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#888888FF"
+            }
+          }
+        },
+        {
+          "id": "fable-label-light",
+          "name": "light Fable row label",
+          "render": "((1 - system.dark) * (1 - providers.opencode.enabled)) && providers.claude.enabled && (providers.claude.enabled && claude.model.fable.available)",
+          "x": "13",
+          "y": "31",
+          "width": "18",
+          "height": "12",
+          "content": {
+            "type": "text",
+            "template": "F",
+            "font_family": "Segoe UI",
+            "font_size": "11",
+            "weight": "medium",
+            "rendering": "clear_type",
+            "contrast": "1",
+            "align": "left",
+            "color": {
+              "color": "#404040FF"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "claude-tray-icon",
+      "name": "Claude Code usage",
+      "render": "providers.claude.enabled",
+      "mouse_events": {
+        "click": "toggle(\"main\", render)",
+        "double_click": "toggle(\"main\", render)",
+        "right_click": "show_context_menu(\"classic-v1\")"
+      },
+      "placement": {
+        "nest": "tray_icon"
+      },
+      "width": "64",
+      "height": "64",
+      "background": {
+        "type": "colour",
+        "colour": {
+          "color": "#D97757FF"
+        }
+      },
+      "corner_radius": "1",
+      "children": [
+        {
+          "id": "claude-tray-70-color",
+          "name": "Claude 50 to 70 percent colour transition",
+          "render": "claude.headline.percentage > 50",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#D08540FF",
+              "opacity": "clamp((claude.session.percentage - 50) / 20, 0, 1)"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "claude-tray-85-color",
+          "name": "Claude 70 to 85 percent colour transition",
+          "render": "claude.headline.percentage > 70",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#CC8C20FF",
+              "opacity": "clamp((claude.session.percentage - 70) / 15, 0, 1)"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "claude-tray-95-color",
+          "name": "Claude 85 to 95 percent colour transition",
+          "render": "claude.headline.percentage > 85",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#C45020FF",
+              "opacity": "clamp((claude.session.percentage - 85) / 10, 0, 1)"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "claude-tray-100-color",
+          "name": "Claude 95 to 100 percent colour transition",
+          "render": "claude.headline.percentage > 95",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#B82020FF",
+              "opacity": "clamp((claude.session.percentage - 95) / 5, 0, 1)"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "claude-tray-one-digit",
+          "name": "Claude one-digit percentage",
+          "render": "(data.poll_ok && claude.available && claude.headline.display < 9.5) && claude.credits.available == 0",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{claude.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "claude-tray-two-digits",
+          "name": "Claude two-digit percentage",
+          "render": "(data.poll_ok && claude.available && claude.headline.display >= 9.5 && claude.headline.display < 99.5) && claude.credits.available == 0",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{claude.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "claude-tray-three-digits",
+          "name": "Claude three-digit percentage",
+          "render": "(data.poll_ok && claude.available && claude.headline.display >= 99.5) && claude.credits.available == 0",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{claude.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "claude-tray-credit-one-digit",
+          "name": "claude credit balance badge",
+          "render": "data.poll_ok && claude.available && claude.credits.available && claude.credits.balance < 9.5",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{claude.credits.balance:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "claude-tray-credit-two-digits",
+          "name": "claude credit balance badge",
+          "render": "data.poll_ok && claude.available && claude.credits.available && claude.credits.balance >= 9.5 && claude.credits.balance < 99.5",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{claude.credits.balance:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "claude-tray-credit-three-digits",
+          "name": "claude credit balance badge",
+          "render": "data.poll_ok && claude.available && claude.credits.available && claude.credits.balance >= 99.5 && claude.credits.balance < 999.5",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{claude.credits.balance:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "claude-tray-credit-thousands",
+          "name": "claude credit balance badge",
+          "render": "data.poll_ok && claude.available && claude.credits.available && claude.credits.balance >= 999.5",
+          "parent": "claude-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{claude.credits.balance / 1000:0.0}k",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "codex-tray-icon",
+      "name": "Codex usage",
+      "render": "providers.codex.enabled",
+      "mouse_events": {
+        "click": "toggle(\"main\", render)",
+        "double_click": "toggle(\"main\", render)",
+        "right_click": "show_context_menu(\"classic-v1\")"
+      },
+      "placement": {
+        "nest": "tray_icon"
+      },
+      "width": "64",
+      "height": "64",
+      "background": {
+        "type": "colour",
+        "colour": {
+          "color": "#FFFFFFFF"
+        }
+      },
+      "corner_radius": "3",
+      "children": [
+        {
+          "id": "codex-tray-high-outline",
+          "name": "Codex high-usage dark outline",
+          "render": "codex.headline.percentage >= 90",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#111111FF"
+            }
+          },
+          "corner_radius": "3"
+        },
+        {
+          "id": "codex-tray-low-fill",
+          "name": "Codex normal dark fill",
+          "render": "codex.headline.percentage < 90",
+          "parent": "codex-tray-icon",
+          "x": "3",
+          "y": "3",
+          "width": "58",
+          "height": "58",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#111111FF"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "codex-tray-high-fill",
+          "name": "Codex high-usage white fill",
+          "render": "codex.headline.percentage >= 90",
+          "parent": "codex-tray-icon",
+          "x": "3",
+          "y": "3",
+          "width": "58",
+          "height": "58",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "codex-tray-placeholder",
+          "name": "Codex loading placeholder",
+          "render": "data.poll_ok == 0 || codex.available == 0",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "C",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "codex-tray-low-one-digit",
+          "name": "Codex normal one-digit percentage",
+          "render": "(data.poll_ok && codex.available && codex.headline.display < 9.5 && codex.headline.percentage < 90) && codex.credits.available == 0",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{codex.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "codex-tray-low-two-digits",
+          "name": "Codex normal two-digit percentage",
+          "render": "(data.poll_ok && codex.available && codex.headline.display >= 9.5 && codex.headline.display < 99.5 && codex.headline.percentage < 90) && codex.credits.available == 0",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{codex.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "codex-tray-low-three-digits",
+          "name": "Codex normal three-digit percentage",
+          "render": "(data.poll_ok && codex.available && codex.headline.display >= 99.5 && codex.headline.percentage < 90) && codex.credits.available == 0",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{codex.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "codex-tray-high-one-digit",
+          "name": "Codex high-usage one-digit percentage",
+          "render": "(data.poll_ok && codex.available && codex.headline.display < 9.5 && codex.headline.percentage >= 90) && codex.credits.available == 0",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{codex.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#111111FF"
+            }
+          }
+        },
+        {
+          "id": "codex-tray-high-two-digits",
+          "name": "Codex high-usage two-digit percentage",
+          "render": "(data.poll_ok && codex.available && codex.headline.display >= 9.5 && codex.headline.display < 99.5 && codex.headline.percentage >= 90) && codex.credits.available == 0",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{codex.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#111111FF"
+            }
+          }
+        },
+        {
+          "id": "codex-tray-high-three-digits",
+          "name": "Codex high-usage three-digit percentage",
+          "render": "(data.poll_ok && codex.available && codex.headline.display >= 99.5 && codex.headline.percentage >= 90) && codex.credits.available == 0",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{codex.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#111111FF"
+            }
+          }
+        },
+        {
+          "id": "codex-tray-credit-one-digit",
+          "name": "codex credit balance badge",
+          "render": "data.poll_ok && codex.available && codex.credits.available && codex.credits.balance < 9.5",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{codex.credits.balance:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "codex-tray-credit-two-digits",
+          "name": "codex credit balance badge",
+          "render": "data.poll_ok && codex.available && codex.credits.available && codex.credits.balance >= 9.5 && codex.credits.balance < 99.5",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{codex.credits.balance:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "codex-tray-credit-three-digits",
+          "name": "codex credit balance badge",
+          "render": "data.poll_ok && codex.available && codex.credits.available && codex.credits.balance >= 99.5 && codex.credits.balance < 999.5",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{codex.credits.balance:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#111111FF"
+            }
+          }
+        },
+        {
+          "id": "codex-tray-credit-thousands",
+          "name": "codex credit balance badge",
+          "render": "data.poll_ok && codex.available && codex.credits.available && codex.credits.balance >= 999.5",
+          "parent": "codex-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{codex.credits.balance / 1000:0.0}k",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#111111FF"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "antigravity-tray-icon",
+      "name": "Antigravity usage",
+      "render": "providers.antigravity.enabled",
+      "mouse_events": {
+        "click": "toggle(\"main\", render)",
+        "double_click": "toggle(\"main\", render)",
+        "right_click": "show_context_menu(\"classic-v1\")"
+      },
+      "placement": {
+        "nest": "tray_icon"
+      },
+      "width": "64",
+      "height": "64",
+      "background": {
+        "type": "colour",
+        "colour": {
+          "color": "#FFFFFFFF"
+        }
+      },
+      "corner_radius": "3",
+      "children": [
+        {
+          "id": "antigravity-tray-high-outline",
+          "name": "Antigravity high-usage blue outline",
+          "render": "antigravity.headline.percentage >= 90",
+          "parent": "antigravity-tray-icon",
+          "width": "64",
+          "height": "64",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1967D2FF"
+            }
+          },
+          "corner_radius": "3"
+        },
+        {
+          "id": "antigravity-tray-low-fill",
+          "name": "Antigravity normal blue fill",
+          "render": "antigravity.headline.percentage < 90",
+          "parent": "antigravity-tray-icon",
+          "x": "3",
+          "y": "3",
+          "width": "58",
+          "height": "58",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#4285F4FF"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "antigravity-tray-high-fill",
+          "name": "Antigravity high-usage white fill",
+          "render": "antigravity.headline.percentage >= 90",
+          "parent": "antigravity-tray-icon",
+          "x": "3",
+          "y": "3",
+          "width": "58",
+          "height": "58",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "antigravity-tray-placeholder",
+          "name": "Antigravity loading placeholder",
+          "render": "data.poll_ok == 0 || antigravity.available == 0",
+          "parent": "antigravity-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "A",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "antigravity-tray-low-one-digit",
+          "name": "Antigravity normal one-digit percentage",
+          "render": "data.poll_ok && antigravity.available && antigravity.headline.display < 9.5 && antigravity.headline.percentage < 90",
+          "parent": "antigravity-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "antigravity-tray-low-two-digits",
+          "name": "Antigravity normal two-digit percentage",
+          "render": "data.poll_ok && antigravity.available && antigravity.headline.display >= 9.5 && antigravity.headline.display < 99.5 && antigravity.headline.percentage < 90",
+          "parent": "antigravity-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "antigravity-tray-low-three-digits",
+          "name": "Antigravity normal three-digit percentage",
+          "render": "data.poll_ok && antigravity.available && antigravity.headline.display >= 99.5 && antigravity.headline.percentage < 90",
+          "parent": "antigravity-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "antigravity-tray-high-one-digit",
+          "name": "Antigravity high-usage one-digit percentage",
+          "render": "data.poll_ok && antigravity.available && antigravity.headline.display < 9.5 && antigravity.headline.percentage >= 90",
+          "parent": "antigravity-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#1967D2FF"
+            }
+          }
+        },
+        {
+          "id": "antigravity-tray-high-two-digits",
+          "name": "Antigravity high-usage two-digit percentage",
+          "render": "data.poll_ok && antigravity.available && antigravity.headline.display >= 9.5 && antigravity.headline.display < 99.5 && antigravity.headline.percentage >= 90",
+          "parent": "antigravity-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#1967D2FF"
+            }
+          }
+        },
+        {
+          "id": "antigravity-tray-high-three-digits",
+          "name": "Antigravity high-usage three-digit percentage",
+          "render": "data.poll_ok && antigravity.available && antigravity.headline.display >= 99.5 && antigravity.headline.percentage >= 90",
+          "parent": "antigravity-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{antigravity.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#1967D2FF"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cursor-tray-icon",
+      "name": "Cursor usage",
+      "render": "providers.cursor.enabled",
+      "mouse_events": {
+        "click": "toggle(\"main\", render)",
+        "double_click": "toggle(\"main\", render)",
+        "right_click": "show_context_menu(\"classic-v1\")"
+      },
+      "placement": {
+        "nest": "tray_icon"
+      },
+      "width": "64",
+      "height": "64",
+      "background": {
+        "type": "colour",
+        "colour": {
+          "color": "#FFFFFFFF"
+        }
+      },
+      "corner_radius": "3",
+      "children": [
+        {
+          "id": "cursor-tray-high-outline",
+          "name": "Cursor high-usage black outline",
+          "render": "cursor.headline.percentage >= 90",
+          "parent": "cursor-tray-icon",
+          "width": "64",
+          "height": "64",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1A1A1AFF"
+            }
+          },
+          "corner_radius": "3"
+        },
+        {
+          "id": "cursor-tray-low-fill",
+          "name": "Cursor normal black fill",
+          "render": "cursor.headline.percentage < 90",
+          "parent": "cursor-tray-icon",
+          "x": "3",
+          "y": "3",
+          "width": "58",
+          "height": "58",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1A1A1AFF"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "cursor-tray-high-fill",
+          "name": "Cursor high-usage white fill",
+          "render": "cursor.headline.percentage >= 90",
+          "parent": "cursor-tray-icon",
+          "x": "3",
+          "y": "3",
+          "width": "58",
+          "height": "58",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "cursor-tray-placeholder",
+          "name": "Cursor loading placeholder",
+          "render": "data.poll_ok == 0 || cursor.available == 0",
+          "parent": "cursor-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "Cu",
+            "font_family": "Arial Bold",
+            "font_size": "34",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "cursor-tray-low-one-digit",
+          "name": "Cursor normal one-digit percentage",
+          "render": "data.poll_ok && cursor.available && cursor.headline.display < 9.5 && cursor.headline.percentage < 90",
+          "parent": "cursor-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{cursor.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "cursor-tray-low-two-digits",
+          "name": "Cursor normal two-digit percentage",
+          "render": "data.poll_ok && cursor.available && cursor.headline.display >= 9.5 && cursor.headline.display < 99.5 && cursor.headline.percentage < 90",
+          "parent": "cursor-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{cursor.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "cursor-tray-low-three-digits",
+          "name": "Cursor normal three-digit percentage",
+          "render": "data.poll_ok && cursor.available && cursor.headline.display >= 99.5 && cursor.headline.percentage < 90",
+          "parent": "cursor-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{cursor.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "cursor-tray-high-one-digit",
+          "name": "Cursor high-usage one-digit percentage",
+          "render": "data.poll_ok && cursor.available && cursor.headline.display < 9.5 && cursor.headline.percentage >= 90",
+          "parent": "cursor-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{cursor.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#1A1A1AFF"
+            }
+          }
+        },
+        {
+          "id": "cursor-tray-high-two-digits",
+          "name": "Cursor high-usage two-digit percentage",
+          "render": "data.poll_ok && cursor.available && cursor.headline.display >= 9.5 && cursor.headline.display < 99.5 && cursor.headline.percentage >= 90",
+          "parent": "cursor-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{cursor.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#1A1A1AFF"
+            }
+          }
+        },
+        {
+          "id": "cursor-tray-high-three-digits",
+          "name": "Cursor high-usage three-digit percentage",
+          "render": "data.poll_ok && cursor.available && cursor.headline.display >= 99.5 && cursor.headline.percentage >= 90",
+          "parent": "cursor-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{cursor.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#1A1A1AFF"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grok-tray-icon",
+      "name": "Grok usage",
+      "render": "providers.grok.enabled",
+      "mouse_events": {
+        "click": "toggle(\"main\", render)",
+        "double_click": "toggle(\"main\", render)",
+        "right_click": "show_context_menu(\"classic-v1\")"
+      },
+      "placement": {
+        "nest": "tray_icon"
+      },
+      "width": "64",
+      "height": "64",
+      "background": {
+        "type": "colour",
+        "colour": {
+          "color": "#FFFFFFFF"
+        }
+      },
+      "corner_radius": "3",
+      "children": [
+        {
+          "id": "grok-tray-high-outline",
+          "name": "Grok high-usage black outline",
+          "render": "grok.headline.percentage >= 90",
+          "parent": "grok-tray-icon",
+          "width": "64",
+          "height": "64",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#5B21B6FF"
+            }
+          },
+          "corner_radius": "3"
+        },
+        {
+          "id": "grok-tray-low-fill",
+          "name": "Grok normal black fill",
+          "render": "grok.headline.percentage < 90",
+          "parent": "grok-tray-icon",
+          "x": "3",
+          "y": "3",
+          "width": "58",
+          "height": "58",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#7C3AEDFF"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "grok-tray-high-fill",
+          "name": "Grok high-usage white fill",
+          "render": "grok.headline.percentage >= 90",
+          "parent": "grok-tray-icon",
+          "x": "3",
+          "y": "3",
+          "width": "58",
+          "height": "58",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "grok-tray-placeholder",
+          "name": "Grok loading placeholder",
+          "render": "data.poll_ok == 0 || grok.available == 0",
+          "parent": "grok-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "Gr",
+            "font_family": "Arial Bold",
+            "font_size": "34",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "grok-tray-low-one-digit",
+          "name": "Grok normal one-digit percentage",
+          "render": "data.poll_ok && grok.available && grok.headline.display < 9.5 && grok.headline.percentage < 90",
+          "parent": "grok-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{grok.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "grok-tray-low-two-digits",
+          "name": "Grok normal two-digit percentage",
+          "render": "data.poll_ok && grok.available && grok.headline.display >= 9.5 && grok.headline.display < 99.5 && grok.headline.percentage < 90",
+          "parent": "grok-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{grok.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "grok-tray-low-three-digits",
+          "name": "Grok normal three-digit percentage",
+          "render": "data.poll_ok && grok.available && grok.headline.display >= 99.5 && grok.headline.percentage < 90",
+          "parent": "grok-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{grok.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "grok-tray-high-one-digit",
+          "name": "Grok high-usage one-digit percentage",
+          "render": "data.poll_ok && grok.available && grok.headline.display < 9.5 && grok.headline.percentage >= 90",
+          "parent": "grok-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{grok.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#5B21B6FF"
+            }
+          }
+        },
+        {
+          "id": "grok-tray-high-two-digits",
+          "name": "Grok high-usage two-digit percentage",
+          "render": "data.poll_ok && grok.available && grok.headline.display >= 9.5 && grok.headline.display < 99.5 && grok.headline.percentage >= 90",
+          "parent": "grok-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{grok.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#5B21B6FF"
+            }
+          }
+        },
+        {
+          "id": "grok-tray-high-three-digits",
+          "name": "Grok high-usage three-digit percentage",
+          "render": "data.poll_ok && grok.available && grok.headline.display >= 99.5 && grok.headline.percentage >= 90",
+          "parent": "grok-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{grok.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#5B21B6FF"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "opencode-tray-icon",
+      "name": "OpenCode usage",
+      "render": "providers.opencode.enabled",
+      "mouse_events": {
+        "click": "toggle(\"main\", render)",
+        "double_click": "toggle(\"main\", render)",
+        "right_click": "show_context_menu(\"classic-v1\")"
+      },
+      "placement": {
+        "nest": "tray_icon"
+      },
+      "width": "64",
+      "height": "64",
+      "background": {
+        "type": "colour",
+        "colour": {
+          "color": "#FFFFFFFF"
+        }
+      },
+      "corner_radius": "3",
+      "children": [
+        {
+          "id": "opencode-tray-high-outline",
+          "name": "OpenCode high-usage green outline",
+          "render": "opencode.headline.percentage >= 90",
+          "parent": "opencode-tray-icon",
+          "width": "64",
+          "height": "64",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#1B5E20FF"
+            }
+          },
+          "corner_radius": "3"
+        },
+        {
+          "id": "opencode-tray-low-fill",
+          "name": "OpenCode normal green fill",
+          "render": "opencode.headline.percentage < 90",
+          "parent": "opencode-tray-icon",
+          "x": "3",
+          "y": "3",
+          "width": "58",
+          "height": "58",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#2E7D32FF"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "opencode-tray-high-fill",
+          "name": "OpenCode high-usage white fill",
+          "render": "opencode.headline.percentage >= 90",
+          "parent": "opencode-tray-icon",
+          "x": "3",
+          "y": "3",
+          "width": "58",
+          "height": "58",
+          "background": {
+            "type": "colour",
+            "colour": {
+              "color": "#FFFFFFFF"
+            }
+          },
+          "corner_radius": "1"
+        },
+        {
+          "id": "opencode-tray-placeholder",
+          "name": "OpenCode loading placeholder",
+          "render": "data.poll_ok == 0 || opencode.available == 0",
+          "parent": "opencode-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "O",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "opencode-tray-low-one-digit",
+          "name": "OpenCode normal one-digit percentage",
+          "render": "data.poll_ok && opencode.available && opencode.headline.display < 9.5 && opencode.headline.percentage < 90",
+          "parent": "opencode-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{opencode.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "opencode-tray-low-two-digits",
+          "name": "OpenCode normal two-digit percentage",
+          "render": "data.poll_ok && opencode.available && opencode.headline.display >= 9.5 && opencode.headline.display < 99.5 && opencode.headline.percentage < 90",
+          "parent": "opencode-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{opencode.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "opencode-tray-low-three-digits",
+          "name": "OpenCode normal three-digit percentage",
+          "render": "data.poll_ok && opencode.available && opencode.headline.display >= 99.5 && opencode.headline.percentage < 90",
+          "parent": "opencode-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{opencode.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#FFFFFFFF"
+            }
+          }
+        },
+        {
+          "id": "opencode-tray-high-one-digit",
+          "name": "OpenCode high-usage one-digit percentage",
+          "render": "data.poll_ok && opencode.available && opencode.headline.display < 9.5 && opencode.headline.percentage >= 90",
+          "parent": "opencode-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{opencode.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "50",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#1B5E20FF"
+            }
+          }
+        },
+        {
+          "id": "opencode-tray-high-two-digits",
+          "name": "OpenCode high-usage two-digit percentage",
+          "render": "data.poll_ok && opencode.available && opencode.headline.display >= 9.5 && opencode.headline.display < 99.5 && opencode.headline.percentage >= 90",
+          "parent": "opencode-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{opencode.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "42",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#1B5E20FF"
+            }
+          }
+        },
+        {
+          "id": "opencode-tray-high-three-digits",
+          "name": "OpenCode high-usage three-digit percentage",
+          "render": "data.poll_ok && opencode.available && opencode.headline.display >= 99.5 && opencode.headline.percentage >= 90",
+          "parent": "opencode-tray-icon",
+          "width": "64",
+          "height": "64",
+          "content": {
+            "type": "text",
+            "template": "{opencode.headline.display:0}",
+            "font_family": "Arial Bold",
+            "font_size": "30",
+            "weight": "bold",
+            "align": "center",
+            "color": {
+              "color": "#1B5E20FF"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

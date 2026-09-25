@@ -115,7 +115,7 @@ After validation, hashes of the installed executable and v1 settings were
 unchanged; the startup registration and original v1 process were unchanged too.
 All three imported backup files matched the snapshots byte for byte. The new
 Codex credits file contained a 64-character SHA-256 key and no raw account ID.
-The experiment remains running with Studio and the restored Floating profile.
+The initial validation left the experiment running with Studio and Floating.
 Implementation commit: `5383c32`. Nothing was pushed, tagged or installed.
 
 These are process/log/configuration checks on the real desktop, not a complete
@@ -127,3 +127,27 @@ desktop test. Unit coverage of lifecycle and positioning is not a replacement.
 
 Local evidence is under `target/upstream-v2-validation` in the original workspace;
 it is excluded from Git and includes no copied provider credentials.
+
+## Compact theme follow-up
+
+The selected editable theme is [Hardened Compact · 3 rows](../src/themes/hardened-claude-three-rows.json).
+It is a standalone theme file: import it through Theme Studio on a fresh profile.
+The local experimental profile already uses it. This change needs no executable
+replacement and does not modify the built-in Classic theme or its user copies.
+
+With Claude, Codex and Fable present, the taskbar surface is 311 × 46 logical pixels,
+versus 439 × 46 in the original experiment and 325 × 46 in the first compact preview.
+Claude has 5h, 7d and F rows; Codex occupies the first two. The Codex text field is
+68 pixels in the three-row layout, retaining room for 100%, reset time and `~`.
+Without the third row it uses 74 pixels; the original credits field keeps 82.
+
+Native renderer checks covered 100%, 125%, 150%, 175% and 200% scaling, English and
+Russian reset suffixes, long percentages/stale markers, row overlap and the case
+where Claude is disabled. A one-off geometry check was run with the normal suite:
+436 passed; the three live environment tests also passed separately. Formatting,
+strict Clippy and diff checks passed. The check and PNGs remain in local evidence
+under `theme-variants`, rather than adding a permanent test for a theme-only edit.
+
+Only the experiment was restarted to apply the theme and reopen Theme Studio.
+Both selected monitor copies were created; monitor settings and positions matched
+the pre-change snapshot, and the v1 settings hash remained unchanged.
