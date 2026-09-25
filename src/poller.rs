@@ -24,7 +24,7 @@ const ANTIGRAVITY_ENDPOINTS: &[&str] = &[
 ];
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-const MODEL_FALLBACK_CHAIN: &[&str] = &["claude-3-haiku-20240307", "claude-haiku-4-5-20251001"];
+const MODEL_FALLBACK_CHAIN: &[&str] = &["claude-haiku-4-5"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PollError {
