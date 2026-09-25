@@ -149,7 +149,7 @@ pub(super) fn context_menu_action_flags(
             state.poll_interval_ms == seconds.saturating_mul(1_000)
         }
         ContextMenuAction::ToggleProvider { provider } => state.providers.contains(*provider),
-        ContextMenuAction::ToggleStartup => return MF_GRAYED,
+        ContextMenuAction::ToggleStartup => is_startup_enabled(),
         ContextMenuAction::ToggleWidget if managed::primary_index(state).is_some() => {
             state.managed_visible
         }

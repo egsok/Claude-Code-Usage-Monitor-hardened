@@ -731,7 +731,12 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     let _ = DestroyWindow(hwnd);
                 }
                 IDM_START_WITH_WINDOWS => {
-                    set_startup_enabled(!is_startup_enabled());
+                    if let Err(error) = set_startup_enabled(!is_startup_enabled()) {
+                        let language = lock_state()
+                            .as_ref()
+                            .map_or(LanguageId::English, |s| s.language);
+                        show_error_message(hwnd, language.text("Start with Windows"), &error);
+                    }
                 }
                 IDM_FREQ_1MIN | IDM_FREQ_5MIN | IDM_FREQ_15MIN | IDM_FREQ_1HOUR => {
                     let new_interval = match id {

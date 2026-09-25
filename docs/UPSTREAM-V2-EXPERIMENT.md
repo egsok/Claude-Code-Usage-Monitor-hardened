@@ -5,14 +5,14 @@
 - Upstream tag: v2.15.14, commit `814ff7339f70ac8234f4a8177dd2b061dc2235fa`.
 - Hardened behavior reference: v1.7.0, commit `bea4ab9`.
 - Branch: `agent/upstream-v2-hardened-experiment`.
-- Application version: `2.15.14-hardened.2`.
+- Application version: `2.15.14-hardened.3`.
 - Keep the upstream native renderer, Studio, themes, account profiles and providers.
 - Apply selected-monitor copies to the first authored taskbar root. Additional
   roots retain their authored behavior. With no taskbar root, copies are unavailable
   and saved monitor selection/positions remain intact.
 
-The installed v1.7 executable, process, settings and startup registration are not
-replaced. The experiment uses its own application directory, named mutexes, window
+The v1.7 executable and settings are retained. The experiment uses its own
+application directory, startup value, named mutexes, window
 classes, Studio title/event, and diagnostic log.
 
 ## Build and launch
@@ -41,8 +41,10 @@ on first launch. Import rejects the live v1 directory and an already populated
 experimental profile. It keeps byte-exact backups inside the experiment and never
 copies provider credentials. A completed import is not repeated.
 
-Close only the experiment to return to v1.7. Do not register the experiment for
-startup or copy it over the installed executable. No public release is implied.
+Close only the experiment to return to v1.7. Daily use can install this build into
+`%LOCALAPPDATA%\Programs\ClaudeCodeUsageMonitorHardenedUpstream2` and enable its own
+startup entry. Keep the v1 executable separate; avoid enabling both versions at
+login. No public release is implied.
 
 ## Deliberate differences from upstream
 
@@ -54,7 +56,8 @@ startup or copy it over the installed executable. No public release is implied.
   non-login shells avoid loading login profiles.
 - Releases are informational, scoped to the hardened repository. Executable
   download/replacement, updater helper and WinGet execution are removed.
-- Startup controls are disabled in this experimental build.
+- Startup is opt-in and uses a separate v2 value. The app never disables v1's
+  registration automatically; switching versions is an explicit installation step.
 - Codex credits stores a domain-separated SHA-256 account key rather than the
   provider account ID. The original ID exists only in memory for request headers.
 - Claude/Codex successes retain separate timestamps and stale readings on failure.
@@ -193,3 +196,37 @@ The updated release is 7,398,912 bytes. Local evidence and the previous executab
 backup are under `target/upstream-v2-validation/auto-eject-runtime`; normal and live
 test logs are `auto-eject-tests.log` and `auto-eject-live-tests.log`. No publication,
 Explorer restart or change to Windows settings was needed.
+
+## Daily installation and login startup
+
+Version `2.15.14-hardened.3` enables **Settings → General → Start with Windows**
+and the corresponding context-menu action. It registers only
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ClaudeCodeUsageMonitorHardenedUpstream2`,
+with the current executable's full path in quotes. Disabling it removes only that
+value. Registry failures are displayed; the switch reads back the actual state.
+Enabling startup is always an explicit user action.
+
+The user requested replacing v1 startup with v2. The build is installed at
+`%LOCALAPPDATA%\Programs\ClaudeCodeUsageMonitorHardenedUpstream2\claude-code-usage-monitor.exe`.
+The original `ClaudeCodeUsageMonitor` Run value was backed up and removed, while
+the v1 executable and settings remain intact. The existing v2 AppData profile,
+compact theme, monitor positions and disabled auto-eject policy are reused.
+The registration starts the monitor alone; Studio opens when requested.
+
+`ureq` now enables `win-system-proxy`. When proxy environment variables are absent,
+it reads the user's existing Windows proxy configuration; the app does not change
+that configuration. This removes the previous launcher's `HTTPS_PROXY` requirement
+for the tested single-server Windows proxy. Other environment overrides retain
+ureq's normal precedence. This does not add PAC or per-protocol-list support beyond
+what the library provides. Restart the app after changing proxy settings, since
+the provider agent is cached.
+
+Validation: 441 regular tests and all three live environment tests passed, including
+real usage retrieval without proxy environment overrides. Formatting and strict
+Clippy passed. Registry tests use disposable isolated keys and verify quoted Unicode
+paths, value types, idempotent removal and preservation of unrelated startup values.
+The installed executable's actual startup handler was toggled on/off/on; the final
+Run value matches its quoted installed path. Both providers returned fresh data,
+all three native windows remained inside their taskbars, and positions were unchanged.
+Windows sign-out/reboot was not performed. Local evidence, previous executable and
+startup/settings snapshots are in `target/upstream-v2-validation/daily-install`.

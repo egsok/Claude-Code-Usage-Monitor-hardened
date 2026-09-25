@@ -47,13 +47,17 @@ impl StudioApp {
                 setting_row(
                     ui,
                     language.text("Start with Windows"),
-                    language.text("Disabled in the experimental build"),
+                    language.text("Launch the monitor when you sign in"),
                     |ui| {
-                        ui.add_enabled_ui(false, |ui| {
-                            Toggle::new(&mut self.startup_enabled)
-                                .labels(language.text("Enabled"), language.text("Disabled"))
-                                .show(ui);
-                        });
+                        if Toggle::new(&mut self.startup_enabled)
+                            .labels(language.text("Enabled"), language.text("Disabled"))
+                            .show(ui)
+                            .changed()
+                        {
+                            self.settings_error =
+                                crate::window::set_startup_enabled(self.startup_enabled).err();
+                            self.startup_enabled = crate::window::is_startup_enabled();
+                        }
                     },
                 );
             });

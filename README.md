@@ -6,7 +6,7 @@ monitor copies. It is a separate local application, not an upgrade of the instal
 
 **Start here:** [experiment notes, build and validation](docs/UPSTREAM-V2-EXPERIMENT.md).
 The experiment never starts provider agent CLIs, refreshes OAuth tokens, installs
-updates or changes Windows startup registration. Upstream installation/update
+updates. Windows startup is opt-in and uses a separate v2 registration. Upstream installation/update
 instructions below do not apply to this experimental build.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)

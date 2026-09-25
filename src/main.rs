@@ -15,6 +15,7 @@ mod monitors;
 mod native_interop;
 mod poller;
 mod providers;
+mod startup;
 mod studio_app;
 mod theme;
 mod theme_engine;

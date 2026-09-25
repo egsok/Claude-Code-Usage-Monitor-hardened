@@ -1194,13 +1194,9 @@ fn begin_update_check(hwnd: HWND, interactive: bool) {
     });
 }
 
-// Experiments never inspect or modify the installed application's startup registration.
-pub(crate) fn is_startup_enabled() -> bool {
-    false
-}
-pub(crate) fn set_startup_enabled(_enable: bool) {
-    diagnose::log("startup changes are disabled for the isolated experiment");
-}
+pub(crate) use crate::startup::{
+    is_enabled as is_startup_enabled, set_enabled as set_startup_enabled,
+};
 
 fn total_widget_width_for_state(state: &AppState) -> i32 {
     widget_frame_for_state(state, None).width
