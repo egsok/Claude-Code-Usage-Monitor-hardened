@@ -8,7 +8,7 @@ application. It reads usage credentials already created by supported provider
 tools, polls provider-owned usage endpoints, and renders compact usage meters in
 the Windows taskbar, a floating window, and the notification area. The program
 uses an event-driven Win32 UI thread plus short-lived background threads for
-network polling, update checks, and taskbar recovery.
+network polling and update checks. Taskbar recovery runs on the surviving UI owner.
 
 ## Component diagram
 
@@ -19,6 +19,8 @@ main.rs
 window.rs <------> native_interop.rs <------> Windows taskbars / Explorer
   |   |                     |
   |   +------> tray_icon.rs +------> Win32 windowing and registry APIs
+  |   +------> window/widgets.rs ---> per-monitor widget windows
+  |   +------> monitors.rs ---------> display identity and selection
   |   +------> theme.rs
   |   +------> localization/
   |
@@ -35,8 +37,8 @@ window.rs <------> native_interop.rs <------> Windows taskbars / Explorer
 
 1. `src/main.rs` detects the optional `--diagnose` flag and enters `window::run()`.
 2. `src/window.rs` establishes the global single-instance mutex, loads the
-   runtime settings and provider usage cache, creates the layered Win32
-   window, tray icons, timers, and taskbar watchdog.
+   runtime settings and provider usage cache, creates the hidden Win32 controller,
+   tray icons, application timers, and layered per-monitor widget windows.
 3. Timer events start `do_poll()` on a background thread. `src/poller.rs` reads only
    the enabled providers' existing credentials and makes synchronous HTTPS
    requests with a 30-second request timeout.
@@ -47,7 +49,7 @@ window.rs <------> native_interop.rs <------> Windows taskbars / Explorer
    prior values for transient failures, writes successful Claude/Codex snapshots
    through `src/usage_cache.rs`, and posts `WM_APP_USAGE_UPDATED` to the UI thread.
 6. The UI thread formats countdowns and stale markers, redraws the layered
-   window, updates tray icons, and schedules either the normal interval or
+   windows, updates tray icons, and schedules either the normal interval or
    exponential retries beginning at 30 seconds.
 
 ## Provider polling
@@ -87,18 +89,20 @@ snapshot while its replacement request is pending.
 
 ## Window and taskbar lifecycle
 
-`src/window.rs` owns application state and the Win32 message procedure. The widget
-starts as a layered popup and can be:
+`src/window.rs` owns the hidden top-level controller, common usage state, polling
+and tray icons. `src/window/widgets.rs` owns taskbar copies or the single floating
+window. Each widget carries its own HWND, DPI, drag state and logical offset.
+Destroying one child never ends the message loop or creates extra polling timers.
 
-- reparented into a primary or secondary taskbar;
-- detached into a top-level floating window;
-- hidden while tray icons remain active.
+`src/monitors.rs` joins CCD device paths to GDI monitors and their native taskbars.
+Settings use the device path, not enumeration order. Display notifications and a
+two-second controller timer reconcile windows with the selected available screens.
+TaskbarCreated restores tray registrations; lost children are recreated in process.
 
-`src/native_interop.rs` discovers `Shell_TrayWnd` and
-`Shell_SecondaryTrayWnd`, adjusts popup/child styles around `SetParent`, and
-restores layered rendering after Explorer or placement changes. A watchdog
-checks taskbar availability every two seconds. Position, monitor selection, and
-placement are persisted in the runtime settings file.
+`src/native_interop.rs` discovers `Shell_TrayWnd` and `Shell_SecondaryTrayWnd` and
+preserves layered child styles around SetParent. Geometry uses GetWindowRect, not
+synchronous SHAppBarMessage. Each widget debounces tray events for 80 ms before
+repositioning; temporary clamping does not change persisted offsets.
 
 The widget does not register reserved taskbar space. Windows 11 centered icons
 can therefore overlap a taskbar-positioned widget; collision avoidance remains
@@ -108,7 +112,9 @@ an explicit backlog item.
 
 | Abstraction | Location | Responsibility |
 |---|---|---|
-| `AppState` | `src/window.rs` | Live UI, polling, placement, retry, and provider state. |
+| `AppState` | `src/window.rs` | Shared usage, controller, settings and widget registry. |
+| `WidgetState` | `src/window/widgets.rs` | One HWND, monitor, DPI, offset and drag state. |
+| `MonitorSetting` | `src/monitors.rs` | Persisted device identity, selection and logical offset. |
 | `WidgetPlacement` | `src/window.rs` | Taskbar or floating window mode; tray-only is represented by widget visibility. |
 | `PollOutcome` | `src/poller.rs` | Provider-isolated data and error result. |
 | `PollError` | `src/poller.rs` | Authentication, credential, expiry, and transient request failures. |
@@ -123,7 +129,9 @@ an explicit backlog item.
 ```text
 src/
   main.rs              process entry point
-  window.rs            Win32 lifecycle, state, layout, menus, timers
+  window.rs            controller, shared state, drawing, menus, timers
+  window/widgets.rs    per-window placement, input and recovery
+  monitors.rs          display identity and selection
   poller.rs            credentials, provider requests, response parsing
   usage_cache.rs       validated, atomic usage snapshot persistence
   models.rs            provider-neutral usage data types

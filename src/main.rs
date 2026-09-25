@@ -3,6 +3,7 @@
 mod diagnose;
 mod localization;
 mod models;
+mod monitors;
 mod native_interop;
 mod poller;
 mod theme;

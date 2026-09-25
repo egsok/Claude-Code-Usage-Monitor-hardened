@@ -77,6 +77,13 @@ cargo build --release
   unquoted form.
 - Invalid temporary tray geometry does not collapse the widget position.
 - Layout retains room for the model-scoped Fable text as provider count changes.
+- Monitor identities survive enumeration/primary changes; fallback and reconnection
+  preserve selected screens and their independent logical offsets.
+- Migration selects the primary screen, retains hidden/floating/provider settings,
+  and keeps the exact legacy backup across atomic settings writes.
+- Destroying a synthetic taskbar parent leaves the controller alive and allows
+  recreation of its widget child with the saved offset.
+- Visibility and placement menu commands have distinct IDs.
 
 ## Writing new tests
 
@@ -124,11 +131,26 @@ the change, and run the full matrix before a release affecting `src/window.rs`,
 | Authentication | Expire/remove each enabled provider's credentials; refresh them through the provider tool; verify automatic recovery without agent launch. |
 | Fable | Detailed response includes Fable; Messages fallback omits it; later authoritative response removes it. |
 | Refresh | Manual refresh with known values; provider toggle off/on; normal interval; exponential retry. |
-| Placement | Primary and secondary taskbars; drag; floating; tray-only; placement reset; centered Windows 11 icons. |
-| Explorer | Restart Explorer and verify the widget reattaches or relaunches without becoming invisible. |
+| Placement | Monitor checkboxes; independent drag and reset; tray reset-all; Floating → Taskbar round-trip; global hide/show. |
+| Topology | Reorder monitors, change primary, disconnect some/all selected screens, reconnect, remove secondary taskbars, mixed DPI and negative coordinates. |
+| Migration | Legacy settings select primary; offset conversion; hidden/floating state; exact backup preserved across subsequent saves. |
+| Explorer | Restart Explorer and verify all selected widgets are recreated and visible, with the controller alive and no duplicate tray icons. |
 | Windows restart | Verify installed-path autostart, saved position, visibility, provider selection, and cached bars. |
 | Theme/DPI | Light and dark taskbars, mixed-DPI monitors, and taskbar scale changes. |
 | Release | Installed EXE and downloaded GitHub asset report the intended PE version. |
+
+### Local v1.7.0 verification (2026-09-25)
+
+- Automated suite: 43 passed, no failed or ignored tests; format and Clippy checks passed.
+- On the three-screen desktop, isolated settings created three taskbar children
+  at 144/96/96 DPI with one initial poll worker. Floating created one window;
+  an unavailable selected device created one temporary primary-screen copy.
+- The user confirmed the primary-screen widget and Monitors menu. Saved settings
+  contained two enabled screens with distinct offsets after interaction.
+- The installed EXE reports 1.7.0. Original settings and executables were backed
+  up locally; the user's current monitor selections and positions were retained.
+- Physical unplug/reconnect, a real Explorer restart, Windows reboot and the
+  complete provider/network matrix above were not performed in this session.
 
 ## CI integration
 

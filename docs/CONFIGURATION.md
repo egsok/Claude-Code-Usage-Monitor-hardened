@@ -25,6 +25,10 @@ below, which keeps files written by older versions compatible.
 
 ```json
 {
+  "version": 2,
+  "monitors": [
+    { "id": "<Windows monitor device path>", "name": "Display", "enabled": true, "offset_dip": 0 }
+  ],
   "tray_offset": 0,
   "taskbar_index": 0,
   "widget_placement": "taskbar",
@@ -46,8 +50,10 @@ load so the application never starts with an empty provider set.
 
 | Setting | Default | Meaning |
 |---|---:|---|
-| `tray_offset` | `0` | Horizontal taskbar placement offset. |
-| `taskbar_index` | `0` | Selected taskbar in the sorted taskbar list. |
+| `version` | migration pending | Schema 2 stores monitors by device path. |
+| `monitors` | primary selected on first discovery | Per-screen identity, label, enabled flag and tray-relative offset in 96-DPI logical pixels. |
+| `tray_offset` | `0` | Legacy physical offset, read only for migration. |
+| `taskbar_index` | `0` | Legacy field; no longer used to select a screen. |
 | `widget_placement` | `taskbar` | `taskbar` or `floating`; tray-only uses `widget_visible: false`. |
 | `floating_x`, `floating_y` | unset | Saved top-level window coordinates. |
 | `poll_interval_ms` | `900000` | Normal polling interval; UI choices are 1, 5, 15, or 60 minutes. |
@@ -60,6 +66,24 @@ load so the application never starts with an empty provider set.
 
 These fields are implementation-owned. Edit them only while the monitor is not
 running, because a later menu or placement change can overwrite the file.
+
+### Monitor migration and recovery
+
+On first successful display discovery, an older file selects the primary monitor
+and converts its saved pixel offset to logical pixels. The exact previous JSON
+is backed up once as `settings.pre-v2.json`. Settings writes use a temporary file,
+flush, and atomic replacement. Restore the backup with the old EXE when rolling back.
+
+Connected screens and saved disconnected screens appear in Settings → Monitors.
+The last selected screen cannot be unchecked; hide everything with Tray only.
+Checkbox changes keep each screen's saved offset. Runtime geometry clamping and
+temporary primary-screen fallback never overwrite the user's selection or offset.
+A taskbar copy requires a standard Windows taskbar; no available taskbars means
+tray-only until one becomes available. Floating uses one separate saved position.
+
+Device paths survive taskbar recreation and screen reordering. A different port
+or driver identity may produce a new path and require selecting the screen again.
+Failed display discovery retains the last good snapshot and retries in two seconds.
 
 ## Usage cache format
 
@@ -98,8 +122,7 @@ principle: this application does not invoke their login flows.
 | `LOCALAPPDATA` | No | none | Detects whether the EXE is under a user WinGet package root. |
 | `ProgramFiles` | No | `C:\Program Files` | Detects a machine WinGet package root. |
 | `ProgramFiles(x86)` | No | `C:\Program Files (x86)` | Detects a 32-bit WinGet package root. |
-| `CCUM_RELAUNCH` | Internal | unset | Marks a controlled relaunch after taskbar recovery. |
-| `CCUM_LAST_RELAUNCH_UNIX` | Internal | unset | Throttles repeated relaunch attempts. |
+
 
 `ureq` is compiled with proxy-from-environment support, so standard process
 proxy settings may affect HTTPS routing. The application itself does not expose

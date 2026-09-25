@@ -51,3 +51,11 @@ pub(super) const STRINGS: Strings = Strings {
     antigravity_window_title: "Antigravity 사용량 모니터",
     second_suffix: "초",
 };
+
+pub const MONITOR_STRINGS: super::MonitorStrings = super::MonitorStrings {
+    monitors: "모니터",
+    primary: "기본",
+    disconnected: "연결 끊김",
+    no_taskbar: "작업 표시줄 없음",
+    reset_all: "모든 위젯 위치 초기화",
+};

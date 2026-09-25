@@ -51,3 +51,11 @@ pub(super) const STRINGS: Strings = Strings {
     codex_window_title: "Monitor de uso do Codex",
     antigravity_window_title: "Monitor de uso do Antigravity",
 };
+
+pub const MONITOR_STRINGS: super::MonitorStrings = super::MonitorStrings {
+    monitors: "Monitores",
+    primary: "principal",
+    disconnected: "desconectado",
+    no_taskbar: "sem barra de tarefas",
+    reset_all: "Redefinir todas as posições",
+};

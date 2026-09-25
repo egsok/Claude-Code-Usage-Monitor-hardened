@@ -51,3 +51,11 @@ pub(super) const STRINGS: Strings = Strings {
     codex_window_title: "Монитор использования Codex",
     antigravity_window_title: "Монитор использования Antigravity",
 };
+
+pub const MONITOR_STRINGS: super::MonitorStrings = super::MonitorStrings {
+    monitors: "Мониторы",
+    primary: "основной",
+    disconnected: "отключён",
+    no_taskbar: "нет панели задач",
+    reset_all: "Сбросить положения всех виджетов",
+};

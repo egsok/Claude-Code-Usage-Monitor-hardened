@@ -15,7 +15,7 @@ const CODEX_TRAY_ICON_ID: u32 = 2;
 const ANTIGRAVITY_TRAY_ICON_ID: u32 = 3;
 
 /// Menu item ID for toggling widget visibility (used by window.rs context menu).
-pub const IDM_TOGGLE_WIDGET: u16 = 70;
+pub const IDM_TOGGLE_WIDGET: u16 = 73;
 
 /// Actions the tray message handler can request from the main window.
 pub enum TrayAction {

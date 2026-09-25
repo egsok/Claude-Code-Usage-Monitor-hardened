@@ -58,7 +58,20 @@ This remains a local credential-reading utility: it must read provider OAuth
 credentials and send them to the corresponding official usage endpoints. See
 [Privacy And Security](#privacy-and-security) for the exact data flow.
 
-### What's New in v1.6.4
+### What's New in v1.7.0
+
+- **Settings → Monitors** selects taskbar copies with checkboxes. Each copy keeps
+  its own position and DPI; all share the same usage data and polling.
+- Monitor selection follows Windows device identity instead of taskbar order.
+  First launch migrates to the primary screen and backs up the old settings.
+- Disconnected screens keep their positions. If none of the selected taskbars
+  is available, one temporary copy appears on the primary taskbar.
+- Floating stays a single window; switching back restores the taskbar copies.
+- Explorer recovery recreates child widgets without restarting polling. Tray
+  movement is debounced, and taskbar geometry queries no longer call the appbar service.
+- Claude fallback probes now use the current Haiku alias. Hardened restrictions remain.
+
+### Previous release: v1.6.4
 
 - Reset countdowns from 24 hours upward now show tenths of a day instead of
   truncating to whole days. For example, `47h 59m` is shown as `1.9d`, not `1d`.
@@ -78,7 +91,7 @@ credentials and send them to the corresponding official usage endpoints. See
 - System tray icon badges showing your enabled model usage percentage
 - Left-click the tray icon to toggle the taskbar widget on or off
 - Right-click options for refresh, displayed models, update frequency, language, startup, widget visibility, and updates
-- Multi-monitor taskbar placement, so the widget can live on the taskbar for the screen you prefer
+- Taskbar copies on selected monitors, with independently saved positions
 - Taskbar, freely movable floating-window, and tray-only placement modes
 
 ### Fable Weekly Limit
@@ -141,7 +154,9 @@ claude-code-usage-monitor
 Once running, it will appear in your taskbar and as one or more tray icons in the notification area.
 
 - Drag the visible grip on the left edge to move the widget
-- On multi-monitor setups, drag the widget onto another Windows taskbar to move it to that screen
+- Use **Settings → Monitors** to select screens; drag each copy within its own taskbar
+- Reset position from a widget to reset that copy, or from the tray to reset all copies
+- To hide every copy, use **Tray only** or left-click a provider tray icon
 - Use **Settings → Placement → Floating** to move the widget anywhere on screen
 - Use **Settings → Placement → Tray only** to hide the widget while keeping its tray icons
 - Right-click the taskbar widget or tray icon for refresh, displayed models, update frequency, Start with Windows, reset position, language, updates, and exit
@@ -316,7 +331,20 @@ Codex и Google Antigravity прямо в панели задач. Hardened-ве
   (`47ч 59м` отображается как `1.9д`). При выводе только целых дней терялось до
   23 часов 59 минут, поэтому почти двое суток могли выглядеть как `1д`.
 
-### Что нового в v1.6.4
+### Что нового в v1.7.0
+
+- В **Настройки → Мониторы** можно галочками выбрать экраны для показа виджета.
+  Каждая копия запоминает свою позицию; данные и опрос провайдеров общие.
+- Мониторы запоминаются по идентификатору устройства Windows. При первом запуске
+  выбирается основной экран и создаётся резервная копия прежних настроек.
+- При отключении всех выбранных экранов появляется временная копия на основном.
+  При подключении выбранного экрана возвращаются сохранённые позиции.
+- Floating остаётся одним окном. Возврат в панель задач восстанавливает копии.
+- Восстановление после перезапуска Explorer не останавливает приложение; события
+  трея обрабатываются после завершения серии изменений, чтобы уменьшить дрожание.
+- Обновлена модель резервного запроса Claude; ограничения hardened-версии сохранены.
+
+### Предыдущий релиз: v1.6.4
 
 - Таймеры от 24 часов теперь показывают десятые доли дня вместо целых дней:
   например, `47ч 59м` отображается как `1.9д`, а не как `1д`.
@@ -342,6 +370,11 @@ credentials и восстановит данные автоматически. �
 последнее известное значение, пока приложение повторяет подробный запрос.
 
 ![Компактный индикатор недельного лимита Fable в панели задач](.github/screenshots/fable-taskbar.png)
+
+Выбрать экраны можно через **Настройки → Мониторы**. Перетаскивание за левую
+ручку меняет положение только этой копии внутри её панели. Сброс из меню
+виджета действует на него, сброс из трея — на все копии. После смены разъёма
+Windows может присвоить экрану новый идентификатор: тогда выберите его заново.
 
 Через **Настройки → Размещение** можно оставить виджет в панели задач,
 переключить его в свободно перемещаемое плавающее окно или оставить только

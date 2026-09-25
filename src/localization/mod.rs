@@ -31,7 +31,31 @@ pub enum LanguageId {
     PortugueseBrazil,
 }
 
+pub struct MonitorStrings {
+    pub monitors: &'static str,
+    pub primary: &'static str,
+    pub disconnected: &'static str,
+    pub no_taskbar: &'static str,
+    pub reset_all: &'static str,
+}
+
 impl LanguageId {
+    pub fn monitor_strings(self) -> MonitorStrings {
+        match self {
+            Self::English => english::MONITOR_STRINGS,
+            Self::Russian => russian::MONITOR_STRINGS,
+            Self::Dutch => dutch::MONITOR_STRINGS,
+            Self::Spanish => spanish::MONITOR_STRINGS,
+            Self::French => french::MONITOR_STRINGS,
+            Self::German => german::MONITOR_STRINGS,
+            Self::Japanese => japanese::MONITOR_STRINGS,
+            Self::Korean => korean::MONITOR_STRINGS,
+            Self::TraditionalChinese => traditional_chinese::MONITOR_STRINGS,
+            Self::PortugueseBrazil => portuguese_brazil::MONITOR_STRINGS,
+            Self::SimplifiedChinese => simplified_chinese::MONITOR_STRINGS,
+        }
+    }
+
     pub const ALL: [LanguageId; 11] = [
         LanguageId::English,
         LanguageId::Dutch,

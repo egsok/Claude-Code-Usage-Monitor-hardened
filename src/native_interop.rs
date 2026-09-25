@@ -147,46 +147,6 @@ pub fn embed_in_taskbar(hwnd: HWND, taskbar_hwnd: HWND) -> Result<(), String> {
     Ok(())
 }
 
-/// Leave SetLayeredWindowAttributes mode so UpdateLayeredWindow can render.
-/// The caller must hide the popup first; Windows otherwise keeps the old
-/// attribute-based rendering state even when the style bit is toggled.
-pub fn reset_layered_rendering(hwnd: HWND) -> Result<(), String> {
-    unsafe {
-        let desired_ex_style = taskbar_extended_style(GetWindowLongW(hwnd, GWL_EXSTYLE));
-        let without_layered = desired_ex_style & !(WS_EX_LAYERED.0 as i32);
-        apply_extended_style(hwnd, without_layered, false, "while clearing layered state")?;
-        apply_extended_style(
-            hwnd,
-            desired_ex_style,
-            true,
-            "while restoring layered state",
-        )?;
-    }
-
-    Ok(())
-}
-
-/// Detach an embedded widget and restore it as a top-level popup window.
-pub fn detach_from_taskbar(hwnd: HWND) {
-    unsafe {
-        let _ = SetParent(hwnd, HWND::default());
-
-        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
-        let new_style = (style & !WS_CHILD_STYLE & !WS_CLIPSIBLINGS_STYLE) | WS_POPUP_STYLE;
-        let _ = SetWindowLongW(hwnd, GWL_STYLE, new_style as i32);
-
-        let _ = SetWindowPos(
-            hwnd,
-            HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-        );
-    }
-}
-
 /// Move the window
 pub fn move_window(hwnd: HWND, x: i32, y: i32, w: i32, h: i32) {
     unsafe {
@@ -215,11 +175,6 @@ pub fn set_tray_event_hook(
             Some(hook)
         }
     }
-}
-
-/// Get the thread ID that owns a window
-pub fn get_window_thread_id(hwnd: HWND) -> u32 {
-    unsafe { GetWindowThreadProcessId(hwnd, None) }
 }
 
 /// Unhook a WinEvent hook

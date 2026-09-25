@@ -51,3 +51,11 @@ pub(super) const STRINGS: Strings = Strings {
     antigravity_window_title: "Antigravity 使用量モニター",
     second_suffix: "秒",
 };
+
+pub const MONITOR_STRINGS: super::MonitorStrings = super::MonitorStrings {
+    monitors: "モニター",
+    primary: "メイン",
+    disconnected: "未接続",
+    no_taskbar: "タスクバーなし",
+    reset_all: "すべてのウィジェット位置をリセット",
+};

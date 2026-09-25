@@ -54,3 +54,11 @@ pub(super) const STRINGS: Strings = Strings {
     antigravity_window_title: "Antigravity 使用量監控",
     second_suffix: "秒",
 };
+
+pub const MONITOR_STRINGS: super::MonitorStrings = super::MonitorStrings {
+    monitors: "螢幕",
+    primary: "主要",
+    disconnected: "已中斷連線",
+    no_taskbar: "無工作列",
+    reset_all: "重設所有小工具位置",
+};

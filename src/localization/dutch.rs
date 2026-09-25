@@ -51,3 +51,11 @@ pub(super) const STRINGS: Strings = Strings {
     antigravity_window_title: "Antigravity-gebruiksmonitor",
     second_suffix: "s",
 };
+
+pub const MONITOR_STRINGS: super::MonitorStrings = super::MonitorStrings {
+    monitors: "Beeldschermen",
+    primary: "primair",
+    disconnected: "niet aangesloten",
+    no_taskbar: "geen taakbalk",
+    reset_all: "Alle widgetposities herstellen",
+};
