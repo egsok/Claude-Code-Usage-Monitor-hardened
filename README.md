@@ -1,4 +1,13 @@
-# Claude Code Usage Monitor
+# Claude Code Usage Monitor — Hardened v2 Experiment
+
+This branch experiments with upstream v2.15.14 plus the hardened fork's passive
+provider polling, resilient cached usage, Fable display and independently positioned
+monitor copies. It is a separate local application, not an upgrade of the installed v1.7.
+
+**Start here:** [experiment notes, build and validation](docs/UPSTREAM-V2-EXPERIMENT.md).
+The experiment never starts provider agent CLIs, refreshes OAuth tokens, installs
+updates or changes Windows startup registration. Upstream installation/update
+instructions below do not apply to this experimental build.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
