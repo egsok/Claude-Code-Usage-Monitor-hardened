@@ -554,6 +554,10 @@ pub(super) fn format_usage_line(base: &str, context: &DataContext) -> Option<Str
         .unwrap_or(0.0)
         <= 0.0
     {
+        if (provider == "claude" || provider.starts_with("accounts.claude.")) && window != "credits"
+        {
+            return Some(format!("{percentage}% · --{marker}"));
+        }
         return Some(format!("{percentage}%{marker}"));
     }
     let seconds = context

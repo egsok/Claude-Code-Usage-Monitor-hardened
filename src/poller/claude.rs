@@ -6,20 +6,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 
 use super::claude_desktop;
-use super::{
-    build_agent, get_header_f64, get_header_i64, parse_iso8601, unix_to_system_time, HttpResponse,
-    PollError,
-};
+use super::{build_agent, parse_iso8601, PollError};
 use crate::diagnose;
 use crate::models::{CreditsSection, UsageData};
 
 mod limits;
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
-const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
-// Keep header probes on the low-cost Haiku tier. This API alias follows 4.5
-// snapshots, but still needs updating when the Haiku 4.5 generation retires.
-const MODEL_FALLBACK_CHAIN: &[&str] = &["claude-haiku-4-5"];
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Deserialize)]
@@ -90,7 +83,7 @@ pub(super) fn poll_claude_code() -> Result<UsageData, PollError> {
 
     let creds = usable_credentials(creds)?;
 
-    fetch_usage_with_fallback(&creds.access_token)
+    fetch_usage(&creds.access_token)
 }
 
 /// Explicit profiles are pinned to one source, including when refresh fails.
@@ -110,7 +103,7 @@ pub(super) fn poll_account(path: &Path) -> Result<UsageData, PollError> {
         };
 
     let credentials = usable_credentials(credentials)?;
-    fetch_usage_with_fallback(&credentials.access_token)
+    fetch_usage(&credentials.access_token)
 }
 
 /// The desktop app's token, but only for a profile that points at the default
@@ -159,69 +152,26 @@ fn account_watch_signature_with_desktop(path: &Path, desktops: &[PathBuf]) -> St
     crate::accounts::fingerprint(&signature)
 }
 
-pub(super) fn fetch_usage_with_fallback(token: &str) -> Result<UsageData, PollError> {
-    // Try the dedicated usage endpoint first
-    if let Some(data) = try_usage_endpoint(token)? {
-        // If reset timers are missing, fill them in from the Messages API
-        if (data.session.available && data.session.resets_at.is_none())
-            || (data.weekly.available && data.weekly.resets_at.is_none())
-        {
-            if let Ok(fallback) = fetch_usage_via_messages(token) {
-                let mut merged = data;
-                merged.session.available |= fallback.session.available;
-                merged.weekly.available |= fallback.weekly.available;
-                if merged.session.resets_at.is_none() {
-                    merged.session.resets_at = fallback.session.resets_at;
-                }
-                if merged.weekly.resets_at.is_none() {
-                    merged.weekly.resets_at = fallback.weekly.resets_at;
-                }
-                return Ok(merged);
-            }
-        }
-        return Ok(data);
-    }
-
-    // Fall back to Messages API with rate limit headers
-    let result = fetch_usage_via_messages(token);
-    if result.is_err() {
-        diagnose::log("usage endpoint and Messages API fallback both failed");
-    }
-    result
+pub(super) fn fetch_usage(token: &str) -> Result<UsageData, PollError> {
+    fetch_usage_at(&build_agent()?, token, USAGE_URL)
 }
 
-pub(super) fn try_usage_endpoint(token: &str) -> Result<Option<UsageData>, PollError> {
-    let agent = build_agent()?;
-
-    let mut resp = match agent
-        .get(USAGE_URL)
+fn fetch_usage_at(agent: &ureq::Agent, token: &str, url: &str) -> Result<UsageData, PollError> {
+    let mut response = agent
+        .get(url)
         .header("Authorization", &format!("Bearer {token}"))
         .header("anthropic-beta", "oauth-2025-04-20")
+        .config()
+        .max_redirects(0)
+        .build()
         .call()
         .and_then(super::check_http_status)
-    {
-        Ok(resp) => resp,
-        Err(error) => match classify_usage_failure(&error) {
-            UsageEndpointFailure::Auth => {
-                diagnose::log(format!(
-                    "usage endpoint returned an auth error ({error}); re-login required"
-                ));
-                return Err(usage_request_error(&error));
-            }
-            UsageEndpointFailure::Transient => {
-                diagnose::log(format!("usage endpoint temporarily unavailable ({error})"));
-                return Err(usage_request_error(&error));
-            }
-            UsageEndpointFailure::Unsupported => {
-                diagnose::log(format!(
-                    "usage endpoint unavailable for this account ({error}); trying the Messages API"
-                ));
-                return Ok(None);
-            }
-        },
-    };
-
-    parse_usage_body(resp.body_mut()).map(Some)
+        .map_err(|error| usage_request_error(&error))?;
+    if !response.status().is_success() {
+        return Err(PollError::HttpStatus(response.status().as_u16()));
+    }
+    // Missing reset fields stay unknown. No request to a model is permitted.
+    parse_usage_body(response.body_mut())
 }
 
 fn parse_usage_body(body: &mut ureq::Body) -> Result<UsageData, PollError> {
@@ -285,31 +235,6 @@ fn usage_from_response(response: UsageResponse) -> UsageData {
     data
 }
 
-/// What a failed call to the usage endpoint actually tells us.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum UsageEndpointFailure {
-    /// The credentials were rejected.
-    Auth,
-    /// Rate limited, a server-side fault, or the network. Retrying later is
-    /// the right move. Asking the Messages API instead would spend real quota
-    /// on a request whose only purpose is to read headers, and during a rate
-    /// limit it would add to the load that caused it.
-    Transient,
-    /// The endpoint is not usable on this account, which is what the Messages
-    /// API fallback exists for.
-    Unsupported,
-}
-
-fn classify_usage_failure(error: &ureq::Error) -> UsageEndpointFailure {
-    match error {
-        ureq::Error::StatusCode(401 | 403) => UsageEndpointFailure::Auth,
-        ureq::Error::StatusCode(429) => UsageEndpointFailure::Transient,
-        ureq::Error::StatusCode(code) if *code >= 500 => UsageEndpointFailure::Transient,
-        ureq::Error::StatusCode(_) => UsageEndpointFailure::Unsupported,
-        _ => UsageEndpointFailure::Transient,
-    }
-}
-
 fn usage_request_error(error: &ureq::Error) -> PollError {
     match error {
         ureq::Error::StatusCode(status) => PollError::HttpStatus(*status),
@@ -341,129 +266,6 @@ fn claude_credits(spend: &SpendResponse, data: &UsageData) -> Option<CreditsSect
         remaining: (total - used).max(0.0),
         total,
     })
-}
-
-pub(super) fn fetch_usage_via_messages(token: &str) -> Result<UsageData, PollError> {
-    fetch_usage_via_messages_at(token, MESSAGES_URL)
-}
-
-fn fetch_usage_via_messages_at(token: &str, url: &str) -> Result<UsageData, PollError> {
-    let agent = build_agent()?;
-    let mut last_error = PollError::RequestFailed;
-
-    for model in MODEL_FALLBACK_CHAIN {
-        let body = serde_json::json!({
-            "model": model,
-            "max_tokens": 1,
-            "messages": [{"role": "user", "content": "."}]
-        });
-
-        let response = match agent
-            .post(url)
-            // A 429 still carries the usage and reset headers this probe needs.
-            // Keep polling them without recording or obeying a cooldown.
-            .extension(super::retry_after::BypassCooldown)
-            .header("Authorization", &format!("Bearer {token}"))
-            .header("anthropic-version", "2023-06-01")
-            .header("anthropic-beta", "oauth-2025-04-20")
-            .config()
-            .http_status_as_error(false)
-            .build()
-            .send_json(&body)
-        {
-            Ok(resp) => resp,
-            Err(error) => {
-                last_error = usage_request_error(&error);
-                continue;
-            }
-        };
-
-        let status = response.status().as_u16();
-        if status == 401 || status == 403 {
-            diagnose::log(format!(
-                "messages endpoint returned auth error status {status}; re-login required"
-            ));
-            return Err(PollError::HttpStatus(status));
-        }
-
-        let h5 = response
-            .headers()
-            .get("anthropic-ratelimit-unified-5h-utilization");
-        let h7 = response
-            .headers()
-            .get("anthropic-ratelimit-unified-7d-utilization");
-        let hs = response.headers().get("anthropic-ratelimit-unified-status");
-
-        if h5.is_some() || h7.is_some() || hs.is_some() {
-            return Ok(parse_rate_limit_headers(&response));
-        }
-        last_error = if response.status().is_client_error() || response.status().is_server_error() {
-            PollError::HttpStatus(status)
-        } else {
-            PollError::RequestFailed
-        };
-    }
-
-    Err(last_error)
-}
-
-pub(super) fn parse_rate_limit_headers(response: &HttpResponse) -> UsageData {
-    let mut data = UsageData {
-        limits_authoritative: false,
-        ..UsageData::default()
-    };
-
-    data.session.percentage =
-        get_header_f64(response, "anthropic-ratelimit-unified-5h-utilization") * 100.0;
-    data.session.resets_at = unix_to_system_time(get_header_i64(
-        response,
-        "anthropic-ratelimit-unified-5h-reset",
-    ));
-
-    data.weekly.percentage =
-        get_header_f64(response, "anthropic-ratelimit-unified-7d-utilization") * 100.0;
-    data.weekly.resets_at = unix_to_system_time(get_header_i64(
-        response,
-        "anthropic-ratelimit-unified-7d-reset",
-    ));
-    data.session.available = data.session.resets_at.is_some()
-        || response
-            .headers()
-            .contains_key("anthropic-ratelimit-unified-5h-utilization");
-    data.weekly.available = data.weekly.resets_at.is_some()
-        || response
-            .headers()
-            .contains_key("anthropic-ratelimit-unified-7d-utilization");
-
-    let overall_reset = get_header_i64(response, "anthropic-ratelimit-unified-reset");
-    let claim = response
-        .headers()
-        .get("anthropic-ratelimit-unified-representative-claim")
-        .and_then(|value| value.to_str().ok());
-    data.session.available |= claim == Some("five_hour");
-    data.weekly.available |= claim == Some("seven_day");
-
-    if data.session.percentage == 0.0 && data.weekly.percentage == 0.0 {
-        let status = response
-            .headers()
-            .get("anthropic-ratelimit-unified-status")
-            .and_then(|value| value.to_str().ok());
-        if status == Some("rejected") {
-            match claim {
-                Some("five_hour") => data.session.percentage = 100.0,
-                Some("seven_day") => data.weekly.percentage = 100.0,
-                _ => {}
-            }
-        }
-
-        if data.session.resets_at.is_none() && overall_reset.is_some() {
-            data.session.resets_at = unix_to_system_time(overall_reset);
-            // Retain the legacy reset binding, but a shared reset alone does
-            // not establish that the five-hour window exists.
-        }
-    }
-
-    data
 }
 
 pub(super) fn credential_watch_snapshot(all_sources: bool) -> Vec<String> {
@@ -761,88 +563,108 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn repeated_messages_probes_read_usage_and_resets_during_retry_after() {
-        use std::io::{BufRead, BufReader, Read, Write};
+    fn usage_only_http_contract_and_server_cooldown() {
+        use std::io::{BufRead, BufReader, Write};
         use std::net::TcpListener;
-        use std::time::Instant;
-
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let server = std::thread::spawn(move || {
-            for poll in 0..2 {
-                let deadline = Instant::now() + Duration::from_secs(5);
+        for (status, body) in [
+            (
+                200,
+                r#"{"five_hour":{"utilization":42,"resets_at":"2026-12-01T00:00:00Z"}}"#,
+            ),
+            (200, r#"{"five_hour":{"utilization":42}}"#),
+            (200, "invalid json"),
+            (200, "{}"),
+            (401, "{}"),
+            (403, "{}"),
+            (404, "{}"),
+            (429, "{}"),
+            (500, "{}"),
+            (503, "{}"),
+            (302, "{}"),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                listener.set_nonblocking(true).unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
                 let mut stream = loop {
                     match listener.accept() {
                         Ok((stream, _)) => break stream,
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            assert!(Instant::now() < deadline, "probe {poll} never connected");
-                            std::thread::sleep(Duration::from_millis(10));
+                            assert!(std::time::Instant::now() < deadline, "no usage request");
+                            std::thread::sleep(Duration::from_millis(5));
                         }
-                        Err(error) => panic!("accept failed: {error}"),
+                        Err(error) => panic!("{error}"),
                     }
                 };
-                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
-                stream
-                    .set_write_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
                 let mut reader = BufReader::new(&mut stream);
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
-                assert!(line.starts_with("POST /v1/messages "));
-                let mut content_length = 0;
+                assert_eq!(line, "GET /api/oauth/usage HTTP/1.1\r\n");
                 loop {
                     line.clear();
                     assert!(reader.read_line(&mut line).unwrap() > 0);
                     if line == "\r\n" {
                         break;
                     }
-                    if let Some((name, value)) = line.split_once(':') {
-                        if name.eq_ignore_ascii_case("content-length") {
-                            content_length = value.trim().parse::<usize>().unwrap();
-                        }
-                    }
                 }
-                reader.read_exact(&mut vec![0; content_length]).unwrap();
-                let response = format!(
-                    "HTTP/1.1 429 Too Many Requests\r\n\
-                     Retry-After: 7200\r\n\
-                     anthropic-ratelimit-unified-5h-utilization: 1\r\n\
-                     anthropic-ratelimit-unified-7d-utilization: {}\r\n\
-                     anthropic-ratelimit-unified-5h-reset: {}\r\n\
-                     anthropic-ratelimit-unified-7d-reset: {}\r\n\
-                     Content-Length: 2\r\nConnection: close\r\n\r\n{{}}",
-                    if poll == 0 { "0.5" } else { "0.6" },
-                    1_800_000_000 + poll,
-                    1_800_100_000 + poll,
-                );
-                stream.write_all(response.as_bytes()).unwrap();
+                write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nRetry-After: 120\r\nLocation: /forbidden\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                // Keep the listener alive until the client has finished. Any
+                // fallback, redirect or cooldown bypass queues another socket.
+                listener
+            });
+            let agent: ureq::Agent = ureq::Agent::config_builder()
+                .proxy(None)
+                .timeout_global(Some(Duration::from_secs(3)))
+                .http_status_as_error(false)
+                .middleware(super::super::retry_after::middleware)
+                .build()
+                .into();
+            let url = format!("http://{address}/api/oauth/usage");
+            let result = fetch_usage_at(&agent, "fixture-token", &url);
+            if status == 200 && body.contains("utilization") {
+                let data = result.unwrap();
+                assert_eq!(data.session.percentage, 42.0);
+                assert_eq!(data.session.resets_at.is_some(), body.contains("resets_at"));
+            } else if status == 200 {
+                assert_eq!(result.unwrap_err(), PollError::UnexpectedResponse);
+            } else {
+                assert_eq!(result.unwrap_err(), PollError::HttpStatus(status));
             }
-        });
-        let url = format!("http://{address}/v1/messages");
-        let readings = [
-            fetch_usage_via_messages_at("fixture-token", &url),
-            fetch_usage_via_messages_at("fixture-token", &url),
-        ];
-        server.join().unwrap();
-        for (poll, result) in readings.into_iter().enumerate() {
-            let data = result.expect("429 headers should remain readable on every poll");
-            assert!(data.session.available && data.weekly.available);
-            assert_eq!(data.session.percentage, 100.0);
-            assert_eq!(data.weekly.percentage, if poll == 0 { 50.0 } else { 60.0 });
+            if status == 429 || status >= 500 {
+                // The same entry point serves manual refresh too.
+                assert_eq!(
+                    fetch_usage_at(&agent, "fixture-token", &url).unwrap_err(),
+                    PollError::HttpStatus(status)
+                );
+            }
+            let listener = server.join().unwrap();
             assert_eq!(
-                data.session.resets_at,
-                unix_to_system_time(Some(1_800_000_000 + poll as i64))
-            );
-            assert_eq!(
-                data.weekly.resets_at,
-                unix_to_system_time(Some(1_800_100_000 + poll as i64))
+                listener.accept().unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
             );
         }
     }
+
+    #[test]
+    fn claude_has_no_generation_request_implementation() {
+        let source = include_str!("claude.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        for forbidden in [
+            ".post(",
+            "/v1/messages",
+            "MODEL_FALLBACK_CHAIN",
+            "fetch_usage_via_messages",
+        ] {
+            assert!(!source.contains(forbidden), "generation path: {forbidden}");
+        }
+    }
+
     #[test]
     fn http_failures_keep_their_status_for_account_display() {
         for status in [401, 403, 429, 500, 503] {
@@ -1060,7 +882,7 @@ mod tests {
             assert_eq!(evaluate(&format!("{key}.display"), &context).unwrap(), 57.0);
             assert_eq!(
                 format_template(&format!("{{{key}.label}} {{{key}:usage_line}}"), &context),
-                "Fable 43%"
+                "Fable 43% · --"
             );
             assert_eq!(
                 format_template(&format!("{{{key}.display:usage_badge}}"), &context),
@@ -1094,83 +916,6 @@ mod tests {
             assert!(data.session.resets_at.is_none());
             assert!(!data.weekly.available);
         }
-    }
-
-    #[test]
-    fn utilization_headers_report_windows_without_reset_headers() {
-        for (header, session, weekly) in [
-            ("anthropic-ratelimit-unified-5h-utilization", true, false),
-            ("anthropic-ratelimit-unified-7d-utilization", false, true),
-            ("anthropic-ratelimit-unified-status", false, false),
-        ] {
-            let response = ureq::http::Response::builder()
-                .header(header, "0")
-                .body(ureq::Body::builder().data(Vec::new()))
-                .unwrap();
-            let data = parse_rate_limit_headers(&response);
-            assert_eq!(data.session.available, session);
-            assert_eq!(data.weekly.available, weekly);
-        }
-    }
-
-    #[test]
-    fn shared_reset_headers_do_not_invent_a_session_window() {
-        for status in ["allowed", "rejected"] {
-            for (claim, session, weekly) in [
-                ("five_hour", true, false),
-                ("seven_day", false, true),
-                ("unknown", false, false),
-            ] {
-                let response = ureq::http::Response::builder()
-                    .header("anthropic-ratelimit-unified-status", status)
-                    .header("anthropic-ratelimit-unified-reset", "1787198224")
-                    .header("anthropic-ratelimit-unified-representative-claim", claim)
-                    .body(ureq::Body::builder().data(Vec::new()))
-                    .unwrap();
-                let data = parse_rate_limit_headers(&response);
-                assert_eq!(data.session.available, session);
-                assert_eq!(data.weekly.available, weekly);
-            }
-        }
-    }
-
-    fn status_error(code: u16) -> ureq::Error {
-        ureq::Error::StatusCode(code)
-    }
-
-    #[test]
-    fn rate_limits_and_server_faults_do_not_trigger_the_messages_fallback() {
-        // Spending quota on a Messages request is the wrong answer to being
-        // rate limited, and it feeds the condition that caused it.
-        assert_eq!(
-            classify_usage_failure(&status_error(429)),
-            UsageEndpointFailure::Transient
-        );
-        assert_eq!(
-            classify_usage_failure(&status_error(500)),
-            UsageEndpointFailure::Transient
-        );
-        assert_eq!(
-            classify_usage_failure(&status_error(503)),
-            UsageEndpointFailure::Transient
-        );
-    }
-
-    #[test]
-    fn rejected_credentials_are_kept_separate_from_an_absent_endpoint() {
-        assert_eq!(
-            classify_usage_failure(&status_error(401)),
-            UsageEndpointFailure::Auth
-        );
-        assert_eq!(
-            classify_usage_failure(&status_error(403)),
-            UsageEndpointFailure::Auth
-        );
-        // A 404 is the case the Messages API fallback exists to cover.
-        assert_eq!(
-            classify_usage_failure(&status_error(404)),
-            UsageEndpointFailure::Unsupported
-        );
     }
 
     #[test]

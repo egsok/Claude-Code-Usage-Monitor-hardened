@@ -545,7 +545,7 @@ fn classic_fable_is_visible_alongside_weekly_without_growing_taskbar_height() {
             DataContext::from_usage_with_runtime(Some(&data), &Canvas::default(), runtime);
         assert_eq!(
             format_template("F {claude.model.fable:usage_line}", &context),
-            "F 55%~"
+            "F 55% · --~"
         );
         assert_eq!(
             format_template("{claude.model.fable:usage_badge}", &context),
@@ -574,7 +574,7 @@ fn classic_fable_is_visible_alongside_weekly_without_growing_taskbar_height() {
         let SceneContent::Text { template, .. } = &fable.content else {
             panic!("Fable text")
         };
-        assert_eq!(format_template(template, &context), "F 55%~");
+        assert_eq!(format_template(template, &context), "F 55% · --~");
         assert!(
             evaluate(&surface.children[weekly].x.0, &context).unwrap()
                 + evaluate(&surface.children[weekly].width.0, &context).unwrap()
@@ -809,7 +809,7 @@ fn usage_lines_handle_loading_errors_missing_resets_and_language() {
     );
     assert_eq!(
         format_template("{claude.session:usage_line}", &ready),
-        "25%"
+        "25% · --"
     );
     assert_eq!(
         format_template("{claude.session:usage_badge}", &ready),
@@ -2476,7 +2476,7 @@ fn countdown_display_values_invert_usage_without_moving_the_thresholds() {
     assert_eq!(counting_up.get("claude.headline.display"), Some(40.0));
     assert_eq!(
         format_template("{claude.session:usage_line}", &counting_up),
-        "25%"
+        "25% · --"
     );
 
     let counting_down = context(true);
@@ -2487,14 +2487,14 @@ fn countdown_display_values_invert_usage_without_moving_the_thresholds() {
     assert_eq!(counting_down.get("claude.headline.display"), Some(60.0));
     assert_eq!(
         format_template("{claude.session.display:usage_line}", &counting_down),
-        "75%"
+        "75% · --"
     );
 
     // Severity is what a theme colours by, so the spent share never flips.
     for context in [counting_up, counting_down] {
         assert_eq!(
             format_template("{claude.session:usage_line}", &context),
-            "25%"
+            "25% · --"
         );
         assert_eq!(
             format_template("{claude.session:usage_badge}", &context),
@@ -2543,9 +2543,10 @@ fn classic_usage_direction_defaults_to_used_until_enabled() {
             ..Default::default()
         },
     )]);
-    for (countdown, expected, text) in
-        [(settings.usage_countdown, 25.0, "25%"), (true, 75.0, "75%")]
-    {
+    for (countdown, expected, text) in [
+        (settings.usage_countdown, 25.0, "25% · --"),
+        (true, 75.0, "75% · --"),
+    ] {
         let context = DataContext::from_usage_with_runtime(
             Some(&usage),
             &Canvas::default(),

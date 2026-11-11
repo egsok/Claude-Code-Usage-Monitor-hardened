@@ -1,5 +1,36 @@
 # Hardened upstream v2 experiment
 
+## Local passive polling update — 2026-11-11
+
+Version `2.15.14-hardened.4` removes all Claude Messages API probes, including
+missing-reset completion and unsupported-usage fallback. Default, explicit-account
+and Desktop credential paths use only `GET /api/oauth/usage`, without redirects.
+Absent reset times display `--`; cached failed readings retain the existing `~`.
+
+Automatic cycles (including credential recovery) wait at least the selected
+interval after the previous cycle completes. Reset countdown stays local. Claude
+credential rotation discards the old response and waits for the next cycle rather
+than making an immediate second request. The existing shared in-flight guard,
+auth pause, provider/account caches and manual refresh are preserved. Retry-After
+applies to manual refresh too and is no longer shortened to 24 hours.
+
+Offline validation: 438 tests passed, 3 live tests deliberately skipped; fmt,
+strict Clippy and diff checks passed. HTTP fixture tests cover success with/without
+reset, invalid/empty JSON, 401/403/404, 429, 5xx, redirect rejection and cooldown.
+Existing stale/auth/account-isolation and overlapping-worker tests are reused.
+No credentials or generation requests were used in those tests.
+
+Local installation receipt, logs and rollback are under
+`target/passive-poll-20261111` in the root checkout. This is a local change only;
+main, tags and public releases are unchanged. The September section below is
+historical, not the current installed-version claim.
+
+The session is parked at the user's request. The local installation is complete;
+no publication or merge is authorized. Visual taskbar acceptance and successful
+Claude usage after the pre-existing HTTP 401 remain unverified. Codex refreshed
+after restart; settings and the startup entry remained unchanged. Pending checks
+are not instructions to resume work automatically.
+
 ## Current status — 2026-09-25
 
 The session is complete. `2.15.14-hardened.3` is installed for daily testing, with

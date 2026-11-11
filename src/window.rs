@@ -30,11 +30,10 @@ mod managed;
 use crate::localization::{self, LanguageId, Strings};
 use crate::models::AppUsageData;
 use crate::native_interop::{
-    self, TIMER_CLOCK, TIMER_COUNTDOWN, TIMER_MOUSE_CLICK, TIMER_POLL, TIMER_RESET_POLL,
-    TIMER_TRAY_HOVER, TIMER_TRAY_REPOSITION, TIMER_UPDATE_CHECK, TIMER_WINDOW_STATE,
-    WM_APP_DISABLE_DIAGNOSTICS, WM_APP_ENABLE_DIAGNOSTICS, WM_APP_OPEN_DASHBOARD, WM_APP_QUIT,
-    WM_APP_REFRESH_NOW, WM_APP_SETTINGS_UPDATED, WM_APP_TASKBAR_COLLISION, WM_APP_TRAY,
-    WM_APP_USAGE_UPDATED,
+    self, TIMER_CLOCK, TIMER_COUNTDOWN, TIMER_MOUSE_CLICK, TIMER_POLL, TIMER_TRAY_HOVER,
+    TIMER_TRAY_REPOSITION, TIMER_UPDATE_CHECK, TIMER_WINDOW_STATE, WM_APP_DISABLE_DIAGNOSTICS,
+    WM_APP_ENABLE_DIAGNOSTICS, WM_APP_OPEN_DASHBOARD, WM_APP_QUIT, WM_APP_REFRESH_NOW,
+    WM_APP_SETTINGS_UPDATED, WM_APP_TASKBAR_COLLISION, WM_APP_TRAY, WM_APP_USAGE_UPDATED,
 };
 use crate::poller;
 use crate::providers::{ProviderId, ProviderSet};
@@ -191,8 +190,6 @@ fn perform_update_action(hwnd: HWND) {
         begin_update_check(hwnd, true);
     }
 }
-
-const RETRY_BASE_MS: u32 = 30_000; // 30 seconds
 
 // Menu item IDs for update frequency
 const IDM_FREQ_1MIN: u16 = 10;
@@ -2177,7 +2174,7 @@ fn request_poll_inner(hwnd: HWND, queue_if_busy: bool) {
 fn poll_worker(send_hwnd: SendHwnd, scheduled: bool) {
     run_poll_worker(&POLL_IN_FLIGHT, &POLL_PENDING, scheduled, |scheduled| {
         if !scheduled || scheduled_poll_needed() {
-            do_poll_once(send_hwnd.to_hwnd());
+            do_poll_once(send_hwnd.to_hwnd(), scheduled);
         }
     });
 }
@@ -2231,7 +2228,7 @@ fn request_credential_watch(hwnd: HWND) {
     std::thread::spawn(move || {
         run_poll_worker(&POLL_IN_FLIGHT, &POLL_PENDING, true, |watch_only| {
             if !watch_only || recovery_watch_changed() {
-                do_poll_once(hwnd.to_hwnd());
+                do_poll_once(hwnd.to_hwnd(), watch_only);
             }
         });
     });
@@ -2288,7 +2285,38 @@ fn scheduled_poll_needed() -> bool {
         })
 }
 
-fn do_poll_once(hwnd: HWND) {
+// All timer and credential-recovery paths share this gate and POLL_IN_FLIGHT.
+// Measure from completion so a slow provider cannot compress Claude's interval.
+fn automatic_poll_due(last: Option<Instant>, now: Instant, interval_ms: u32) -> bool {
+    last.is_none_or(|last| now.duration_since(last) >= Duration::from_millis(interval_ms.into()))
+}
+
+fn do_poll_once(hwnd: HWND, automatic: bool) {
+    static LAST_COMPLETED: Mutex<Option<Instant>> = Mutex::new(None);
+    let interval = match lock_state().as_ref() {
+        Some(state) if state.polling_enabled => state.poll_interval_ms,
+        _ => return,
+    };
+    if automatic && !automatic_poll_due(*LAST_COMPLETED.lock().unwrap(), Instant::now(), interval) {
+        return;
+    }
+    let started = Instant::now();
+    do_poll_once_inner(hwnd);
+    *LAST_COMPLETED.lock().unwrap() = Some(Instant::now());
+    let next = lock_state()
+        .as_ref()
+        .filter(|state| state.polling_enabled)
+        .map(|state| poller::retry_delay_ms(state.poll_interval_ms, started));
+    // Re-arm from completion rather than skipping the next periodic tick and
+    // accidentally doubling the selected interval after every successful call.
+    if let Some(next) = next {
+        unsafe {
+            SetTimer(Some(hwnd), TIMER_POLL, next, None);
+        }
+    }
+}
+
+fn do_poll_once_inner(hwnd: HWND) {
     let poll_started = Instant::now();
     let (enabled_providers, accounts, previous, force) = {
         let mut state = lock_state();
@@ -2367,13 +2395,6 @@ fn do_poll_once(hwnd: HWND) {
             let cache_data = data.clone();
             let mut next_poll_ms = None;
             if let Some(s) = state.as_mut() {
-                // Stop fast-poll if reset data is now fresh
-                if !poller::app_is_past_reset(&data) {
-                    unsafe {
-                        let _ = KillTimer(Some(hwnd), TIMER_RESET_POLL);
-                    }
-                }
-
                 let retry = poller::account_retry_delay_ms(
                     &data,
                     s.retry_count.saturating_add(1),
@@ -2495,7 +2516,6 @@ fn do_poll_once(hwnd: HWND) {
                             s.retry_count = s.retry_count.saturating_add(1);
                             unsafe {
                                 let _ = KillTimer(Some(hwnd), TIMER_POLL);
-                                let _ = KillTimer(Some(hwnd), TIMER_RESET_POLL);
                                 let _ = KillTimer(Some(hwnd), TIMER_COUNTDOWN);
                                 SetTimer(Some(hwnd), TIMER_POLL, s.poll_interval_ms, None);
                             }
@@ -2508,15 +2528,8 @@ fn do_poll_once(hwnd: HWND) {
                             );
                             s.auth_watch_snapshot.clear();
                             s.retry_count = s.retry_count.saturating_add(1);
-                            let backoff = RETRY_BASE_MS.saturating_mul(
-                                1u32.checked_shl(s.retry_count - 1).unwrap_or(u32::MAX),
-                            );
-                            let retry_ms = poller::retry_delay_ms(
-                                backoff.min(s.poll_interval_ms),
-                                poll_started,
-                            );
+                            let retry_ms = poller::retry_delay_ms(s.poll_interval_ms, poll_started);
                             unsafe {
-                                let _ = KillTimer(Some(hwnd), TIMER_RESET_POLL);
                                 SetTimer(Some(hwnd), TIMER_POLL, retry_ms, None);
                             }
                         }
@@ -2572,18 +2585,11 @@ fn schedule_countdown_timer() {
     if !s.last_poll_ok {
         unsafe {
             let _ = KillTimer(Some(hwnd), TIMER_COUNTDOWN);
-            let _ = KillTimer(Some(hwnd), TIMER_RESET_POLL);
         }
         return;
     }
 
-    // If a reset time has passed, poll every 5s to pick up fresh data
-    if s.data.as_ref().is_some_and(poller::app_is_past_reset) {
-        unsafe {
-            SetTimer(Some(hwnd), TIMER_RESET_POLL, 5_000, None);
-        }
-    }
-
+    // Countdown updates are local; reset never starts a network timer.
     let min_delay = s.data.as_ref().and_then(|data| {
         data.all_usage()
             .flat_map(|usage| usage.sections())
@@ -2934,6 +2940,34 @@ mod placement_regression_tests;
 #[cfg(test)]
 mod credential_watch_worker_tests {
     use super::*;
+
+    #[test]
+    fn automatic_cycles_wait_after_any_completed_poll() {
+        let completed = Instant::now();
+        for interval in [60_000, 300_000, 900_000, 3_600_000] {
+            assert!(automatic_poll_due(None, completed, interval));
+            // Reset, provider failure, credential change and a tick following
+            // manual refresh all enter the same automatic gate.
+            for elapsed in [0, 5_000, 30_000, interval - 1] {
+                assert!(!automatic_poll_due(
+                    Some(completed),
+                    completed + Duration::from_millis(elapsed.into()),
+                    interval
+                ));
+            }
+            assert!(automatic_poll_due(
+                Some(completed),
+                completed + Duration::from_millis(interval.into()),
+                interval
+            ));
+        }
+        // Changing the setting uses the new value without forgetting the poll.
+        assert!(!automatic_poll_due(
+            Some(completed),
+            completed + Duration::from_secs(60),
+            900_000
+        ));
+    }
 
     #[test]
     fn a_manual_refresh_queued_during_a_slow_watch_is_not_lost() {

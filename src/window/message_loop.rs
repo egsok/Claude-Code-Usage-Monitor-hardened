@@ -95,18 +95,6 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     }
                     schedule_clock_timer();
                 }
-                TIMER_RESET_POLL => {
-                    let should_poll = {
-                        let state = lock_state();
-                        state
-                            .as_ref()
-                            .map(|s| !s.auth_error_paused_polling)
-                            .unwrap_or(false)
-                    };
-                    if should_poll {
-                        request_scheduled_poll(hwnd);
-                    }
-                }
                 TIMER_UPDATE_CHECK => {
                     begin_update_check(hwnd, false);
                 }

@@ -6,11 +6,16 @@ monitor copies. It uses a separate application directory and profile; `main`
 remains on stable v1.7.0 while this branch is tried in daily use.
 
 **Start here:** [experiment notes, build and validation](docs/UPSTREAM-V2-EXPERIMENT.md).
-The current build is `2.15.14-hardened.3`, with opt-in Windows startup, a compact
+The current build is `2.15.14-hardened.4`, with opt-in Windows startup, a compact
 three-row Claude theme and a switch for automatic movement above the taskbar.
 The experiment never starts provider agent CLIs, refreshes OAuth tokens, or installs
 updates. Windows startup uses a separate v2 registration. Upstream installation
 and update instructions below do not apply to this experimental build.
+
+Claude statistics use only `GET /api/oauth/usage`: no Messages API probes,
+including when reset fields are absent. Automatic cycles wait at least the selected
+interval after the previous cycle completes; countdown rendering stays local.
+Manual refresh shares the in-flight guard and respects server `Retry-After`.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

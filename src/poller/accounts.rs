@@ -196,7 +196,14 @@ where
                         target.path
                     )
                 });
-                for _ in 0..if paused_error.is_some() { 0 } else { 2 } {
+                let attempts = if paused_error.is_some() {
+                    0
+                } else if target.provider == ProviderId::Claude {
+                    1
+                } else {
+                    2
+                };
+                for _ in 0..attempts {
                     result = match &target.path {
                         Err(_) => Err(PollError::NoCredentials),
                         Ok(path) => poll(target.provider, path.as_deref()).map(stamp_success),
@@ -205,7 +212,7 @@ where
                     if signature == current_signature {
                         break;
                     }
-                    // Re-read once after login/token rotation; never associate
+                    // Claude waits for the next cycle after rotation; never associate
                     // a response (or a stale reading) with replaced credentials.
                     signature = current_signature;
                     result = Err(PollError::RequestFailed);
@@ -635,6 +642,8 @@ mod tests {
             poll_accounts_with(ProviderSet::default(), &settings, |_, _| Ok(usage(42.0))).unwrap();
         for (error, change_source, change_path, expected) in [
             (PollError::RequestFailed, false, false, true),
+            (PollError::UnexpectedResponse, false, false, true),
+            (PollError::NetworkError, false, false, true),
             (PollError::RequestFailed, true, false, false),
             (PollError::RequestFailed, false, true, false),
             (PollError::HttpStatus(429), false, false, true),
@@ -752,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn transient_accounts_retry_shortly_without_marking_healthy_usage_stale() {
+    fn transient_accounts_respect_interval_without_marking_healthy_usage_stale() {
         let settings = AccountSettings::default();
         let enabled = ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Codex]);
         for failed in [ProviderId::Claude, ProviderId::Codex] {
@@ -764,8 +773,8 @@ mod tests {
                 }
             })
             .unwrap();
-            assert_eq!(account_retry_delay_ms(&data, 1, 900_000), Some(30_000));
-            assert_eq!(account_retry_delay_ms(&data, 2, 900_000), Some(60_000));
+            assert_eq!(account_retry_delay_ms(&data, 1, 900_000), Some(900_000));
+            assert_eq!(account_retry_delay_ms(&data, 2, 900_000), Some(900_000));
             assert_eq!(account_retry_delay_ms(&data, 99, 900_000), Some(900_000));
             assert!(data
                 .iter()
@@ -928,7 +937,7 @@ mod tests {
     }
 
     #[test]
-    fn credential_rotation_during_poll_retries_before_publishing() {
+    fn claude_rotation_discards_old_response_and_waits_for_next_cycle() {
         let directory = std::env::temp_dir().join(format!(
             "usage-account-test-{}-{}",
             std::process::id(),
@@ -952,6 +961,20 @@ mod tests {
                 Ok(usage(80.0))
             }
         })
+        .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(data.get(ProviderId::Claude).is_none());
+        assert_eq!(data.accounts[0].error, Some(PollError::RequestFailed));
+        let data = poll_accounts_with_history(
+            ProviderSet::default(),
+            &settings,
+            Some(&data),
+            false,
+            |_, _| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(usage(80.0))
+            },
+        )
         .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(

@@ -2,7 +2,9 @@ use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::diagnose;
-use crate::models::{AppUsageData, UsageData, UsageSection};
+#[cfg(test)]
+use crate::models::UsageSection;
+use crate::models::{AppUsageData, UsageData};
 use crate::providers::{ProviderId, ProviderSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -108,24 +110,17 @@ pub fn paused_account_credentials_changed(data: &AppUsageData) -> bool {
     accounts::paused_credentials_changed(data)
 }
 
-/// Healthy accounts keep publishing while failed accounts use the normal short
-/// retry schedule. Authentication is recovered by watching local sources only.
+/// Failed accounts never shorten the configured polling interval.
+/// Authentication is recovered by watching local sources only.
 pub fn account_retry_delay_ms(
     data: &AppUsageData,
-    retry_count: u32,
+    _retry_count: u32,
     interval_ms: u32,
 ) -> Option<u32> {
     data.accounts
         .iter()
         .any(|account| account.error.is_some_and(PollError::is_transient))
-        .then(|| {
-            30_000u32
-                .saturating_mul(
-                    1u32.checked_shl(retry_count.saturating_sub(1))
-                        .unwrap_or(u32::MAX),
-                )
-                .min(interval_ms)
-        })
+        .then_some(interval_ms)
 }
 
 pub fn poll(
@@ -450,23 +445,6 @@ fn check_http_status(response: HttpResponse) -> Result<HttpResponse, ureq::Error
     }
 }
 
-fn get_header_f64(response: &HttpResponse, name: &str) -> f64 {
-    response
-        .headers()
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0)
-}
-
-fn get_header_i64(response: &HttpResponse, name: &str) -> Option<i64> {
-    response
-        .headers()
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|s| s.parse::<i64>().ok())
-}
-
 fn unix_to_system_time(unix_secs: Option<i64>) -> Option<SystemTime> {
     let secs = unix_secs?;
     if secs < 0 {
@@ -620,6 +598,7 @@ fn time_until_display_change_from_secs(total_secs: u64) -> Duration {
 }
 
 /// Returns true if a reported usage window has reached its reset time.
+#[cfg(test)]
 pub fn is_past_reset(data: &UsageData) -> bool {
     if data.stale {
         return false;
@@ -638,6 +617,7 @@ pub fn is_past_reset(data: &UsageData) -> bool {
         .any(past)
 }
 
+#[cfg(test)]
 pub fn app_is_past_reset(data: &AppUsageData) -> bool {
     data.all_usage().any(is_past_reset)
 }

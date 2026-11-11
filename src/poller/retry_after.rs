@@ -9,15 +9,6 @@ use ureq::SendBody;
 
 use super::HttpResponse;
 
-// Bound the stored cooldown so a bad header cannot lock out an account until
-// restart, including requests triggered by manual refresh.
-const MAX_RETRY_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// Header probes need fresh responses even while the account is rate limited.
-/// This request extension is local metadata and is never sent to the server.
-#[derive(Clone, Copy)]
-pub(super) struct BypassCooldown;
-
 #[derive(Clone, Copy)]
 struct Cooldown {
     received: Instant,
@@ -62,12 +53,12 @@ fn request_key(request: &Request<SendBody>) -> [u8; 32] {
 fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration> {
     let value = value.trim();
     let delay = if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
-        Duration::from_secs(value.parse().unwrap_or(MAX_RETRY_AFTER.as_secs()))
+        Duration::from_secs(value.parse().unwrap_or(u64::MAX))
     } else {
         let deadline = httpdate::parse_http_date(value).ok()?;
         deadline.duration_since(now).unwrap_or_default()
     };
-    Some(delay.min(MAX_RETRY_AFTER))
+    Some(delay)
 }
 
 impl RetryAfter {
@@ -85,9 +76,6 @@ impl RetryAfter {
         now: Instant,
         send: impl FnOnce(Request<SendBody>) -> Result<HttpResponse, ureq::Error>,
     ) -> Result<HttpResponse, ureq::Error> {
-        if request.extensions().get::<BypassCooldown>().is_some() {
-            return send(request);
-        }
         let key = request_key(&request);
         {
             let mut cooldowns = self.cooldowns.lock().unwrap_or_else(|e| e.into_inner());
@@ -198,35 +186,30 @@ mod tests {
     }
 
     #[test]
-    fn caps_seconds_and_http_dates_at_one_day() {
+    fn preserves_server_delays_longer_than_one_day() {
         let now = httpdate::parse_http_date("Wed, 23 Sep 2026 00:00:00 GMT").unwrap();
         for (seconds, date) in [
             (86_399, "Wed, 23 Sep 2026 23:59:59 GMT"),
             (86_400, "Thu, 24 Sep 2026 00:00:00 GMT"),
             (86_401, "Thu, 24 Sep 2026 00:00:01 GMT"),
         ] {
-            let expected = Some(Duration::from_secs(seconds.min(86_400)));
+            let expected = Some(Duration::from_secs(seconds));
             assert_eq!(parse_retry_after(&seconds.to_string(), now), expected);
             assert_eq!(parse_retry_after(date, now), expected);
         }
-        for value in [
-            "18446744073709551615",
-            "999999999999999999999999999999",
-            "Fri, 31 Dec 9999 23:59:59 GMT",
-        ] {
-            assert_eq!(parse_retry_after(value, now), Some(MAX_RETRY_AFTER));
+        for value in ["18446744073709551615", "999999999999999999999999999999"] {
+            assert_eq!(
+                parse_retry_after(value, now),
+                Some(Duration::from_secs(u64::MAX))
+            );
         }
     }
 
     #[test]
-    fn oversized_headers_store_bounded_cooldowns_and_requests_resume_after_expiry() {
+    fn long_server_delays_block_manual_refresh_until_actual_expiry() {
         let future = httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(48 * 60 * 60));
         for status in [429, 503] {
-            for header in [
-                "18446744073709551615",
-                "999999999999999999999999999999",
-                future.as_str(),
-            ] {
+            for header in ["172800", future.as_str()] {
                 let state = RetryAfter::default();
                 let started = Instant::now();
                 state
@@ -234,20 +217,20 @@ mod tests {
                     .unwrap();
                 let key = request_key(&request("first"));
                 let cooldown = state.cooldowns.lock().unwrap()[&key];
-                assert_eq!(cooldown.delay, Duration::from_secs(86_400));
-                assert_eq!(
-                    state.retry_delay_ms(30_000, started, cooldown.received),
-                    86_400_000
-                );
+                assert!(cooldown.delay > Duration::from_secs(172_798));
+                assert!(state.retry_delay_ms(30_000, started, cooldown.received) > 172_798_000);
                 assert!(matches!(
                     state.handle(request("first"), |_| panic!("sent during cooldown")),
                     Err(ureq::Error::StatusCode(code)) if code == status
                 ));
 
-                // Move the clock forward: subtracting a day can precede the
-                // Windows monotonic clock's origin on recently booted hosts.
-                let expired_at =
-                    state.cooldowns.lock().unwrap().get(&key).unwrap().received + MAX_RETRY_AFTER;
+                let after_one_day = cooldown.received + Duration::from_secs(86_400);
+                assert!(state
+                    .handle_at(request("first"), after_one_day, |_| panic!(
+                        "server delay was shortened"
+                    ))
+                    .is_err());
+                let expired_at = cooldown.received + cooldown.delay;
                 let mut sent = false;
                 state
                     .handle_at(request("first"), expired_at, |_| {
@@ -278,41 +261,6 @@ mod tests {
                 .is_ok());
             assert!(state.retry_delay_ms(30_000, started, Instant::now()) > 119_000);
         }
-    }
-
-    #[test]
-    fn bypass_neither_records_nor_obeys_cooldowns() {
-        let state = RetryAfter::default();
-        let started = Instant::now();
-        let probe = || {
-            let mut request = request("first");
-            request.extensions_mut().insert(BypassCooldown);
-            request
-        };
-        for _ in 0..2 {
-            let response = state
-                .handle(probe(), |_| Ok(response(429, Some("7200"))))
-                .unwrap();
-            assert_eq!(response.status(), 429);
-        }
-        assert!(state.cooldowns.lock().unwrap().is_empty());
-        assert_eq!(
-            state.retry_delay_ms(30_000, started, Instant::now()),
-            30_000
-        );
-
-        // A probe also passes through an existing cooldown for the same key,
-        // without clearing it for ordinary requests.
-        state
-            .handle(request("first"), |_| Ok(response(429, Some("7200"))))
-            .unwrap();
-        assert!(state
-            .handle(probe(), |_| Ok(response(429, Some("7200"))))
-            .is_ok());
-        assert!(matches!(
-            state.handle(request("first"), |_| panic!("sent during cooldown")),
-            Err(ureq::Error::StatusCode(429))
-        ));
     }
 
     #[test]
