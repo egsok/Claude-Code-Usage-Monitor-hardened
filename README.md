@@ -13,6 +13,19 @@ allowed to execute and update on the user's machine.
 
 ![Screenshot](.github/animation.gif)
 
+## Release channels / Версии
+
+- **Experimental v2:** [2.15.14-hardened.4](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.4)
+  — Claude usage-only polling, bounded automatic refresh, native Studio and multiple taskbar copies.
+  [v2 README and installation](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/blob/agent/upstream-v2-hardened-experiment/README.md).
+- **Stable published release:** [v1.6.4](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v1.6.4).
+  This `main` branch contains v1.7.0 source; it has not been merged with v2.
+
+**Важно:** отсутствие генерационных проб Claude гарантируется кодом v2
+`2.15.14-hardened.4`. В v1 остаётся резервный запрос Messages API. V2 публикуется
+как prerelease с отдельным профилем; она не заменяет стабильный канал автоматически.
+The v1 documentation below describes v1, including its Messages API fallback.
+
 ## English
 
 A lightweight Windows taskbar widget for people already using Claude Code, with optional Codex and Google Antigravity usage display.

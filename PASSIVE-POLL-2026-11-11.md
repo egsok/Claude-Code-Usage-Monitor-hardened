@@ -6,10 +6,16 @@
 Код и документация v2: коммит cc5f83ae16236ba766074b4e112eba35e43d250e.
 Оставшиеся проверки не являются разрешением продолжать работу автоматически.
 
+## Дополнение 12 ноября
+
+Пользователь поручил push веток и выпуск v2 как prerelease. История парковки
+ниже относится к 11 ноября. Код v2 не объединяется с main; инструкции установки
+и публичные release notes находятся в экспериментальной ветке.
+
 ## Что использовалось
 
 Работал PID 23336 из
-`C:\Users\Egor Sokolov\AppData\Local\Programs\ClaudeCodeUsageMonitorHardenedUpstream2\claude-code-usage-monitor.exe`,
+`%LOCALAPPDATA%\Programs\ClaudeCodeUsageMonitorHardenedUpstream2\claude-code-usage-monitor.exe`,
 версия `2.15.14-hardened.3`, SHA-256
 `4DBB895D29B2859DB71EF1CF1BF3E1B74A4A22083A5BA035607077F46EFC4334`.
 Хэш совпал с сохранённым release EXE и историческим отчётом установки.
@@ -72,7 +78,7 @@ src/theme_engine/theme_expression.rs и src/theme_engine/tests.rs.
 `5DA3FDA85C3D552EE79CD296F80B26C5FC79CB7A95248A90C643A101C816F0DF`.
 
 Откат:
-`N:\dev\Claude-Code-Usage-Monitor\target\passive-poll-20261111\rollback\claude-code-usage-monitor-hardened.3.exe`.
+`target\passive-poll-20261111\rollback\claude-code-usage-monitor-hardened.3.exe`.
 Рядом сохранены settings.json и usage-cache.json, без файлов авторизации.
 Возврат: закрыть только монитор, скопировать сохранённый EXE на прежний путь и
 запустить его. Это описание, откат не выполнялся.
