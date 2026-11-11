@@ -15,7 +15,7 @@ allowed to execute and update on the user's machine.
 
 ## Release channels / Версии
 
-- **Experimental v2:** [2.15.14-hardened.4](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.4)
+- **Experimental v2:** [2.15.14-hardened.5](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.5)
   — Claude usage-only polling, bounded automatic refresh, native Studio and multiple taskbar copies.
   [v2 README and installation](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/blob/agent/upstream-v2-hardened-experiment/README.md).
 - **Stable published release:** [v1.6.4](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v1.6.4).
