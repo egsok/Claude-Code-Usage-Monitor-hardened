@@ -28,20 +28,53 @@ jobs:
 
       # Keep in sync with rust-toolchain.toml.
       - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
 
-      - name: Test informational release safeguards
-        run: cargo test --locked updater
+      - name: Verify tag and release notes
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $version = $metadata.packages[0].version
+          if ($env:RELEASE_TAG -ne "v$version") { throw "Tag does not match Cargo version" }
+          if (-not (Test-Path ".github/release-notes/$env:RELEASE_TAG.md")) { throw "Missing release notes" }
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Test without live provider requests
+        run: cargo test --locked --no-fail-fast
+
+      - name: Check Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings -A clippy::single-match -A clippy::manual-is-multiple-of -A clippy::too-many-arguments
 
       - name: Build release binary
         run: cargo build --release --locked
 
-      - name: Create GitHub Release
+      - name: Generate checksum
+        shell: pwsh
+        run: |
+          $file = "target/release/claude-code-usage-monitor.exe"
+          $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  claude-code-usage-monitor.exe" | Set-Content -Encoding ascii target/release/SHA256SUMS.txt
+
+      - name: Create draft GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: target/release/claude-code-usage-monitor.exe
-          generate_release_notes: true
+          name: Claude Code Usage Monitor Hardened ${{ github.ref_name }}
+          files: |
+            target/release/claude-code-usage-monitor.exe
+            target/release/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+          body_path: .github/release-notes/${{ github.ref_name }}.md
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: "false"
 
   winget:
+    if: ${{ !contains(github.ref_name, '-') }}
     needs: build
     runs-on: windows-latest
     env:

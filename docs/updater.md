@@ -1,43 +1,32 @@
-# Updater verification
+# Update policy for hardened v2
 
-The portable updater accepts only the exact `claude-code-usage-monitor.exe`
-asset from the configured repository's latest stable GitHub release. It rejects
-duplicate assets, unexpected download URLs, invalid semantic versions, drafts,
-and prereleases (including prerelease tags incorrectly marked as stable).
-Version precedence follows SemVer: `2.14.0-beta1` is below `2.14.0`, and build
-metadata does not affect ordering.
+The portable application never downloads, replaces or executes an update EXE.
+Its release check is informational and reads this fork's latest stable GitHub
+release. Prereleases are not offered by that check: download v2 explicitly from
+[GitHub Releases](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases).
 
-Every update requires a valid `sha256:` digest and a nonzero size of at most
-100 MiB in the GitHub release asset metadata. The updater streams the download,
-checks its actual byte count and SHA-256, and only promotes the temporary file
-after both match. It stops reading after the expected size plus one byte,
-regardless of Content-Length, and deletes its partial file on failure. Requests
-and redirects require HTTPS.
+## Manual update
 
-The helper receives the expected size and digest, rechecks the staged file before
-replacing the installed executable, and holds a Windows file handle that denies
-writes and deletion through replacement. Missing or malformed verification
-arguments are errors; the old helper invocation without a digest is rejected.
+1. Download the EXE and SHA256SUMS.txt from the same release.
+2. Compare the EXE SHA-256 using PowerShell `Get-FileHash`.
+3. Close the monitor and retain the old EXE for rollback.
+4. Replace the EXE at its existing path and start it. Keep the profile and
+   provider credentials; path-based routing and startup continue using that path.
 
-## Trust boundary
+For rollback, close the monitor and put the saved EXE back at the same path.
+V1 and v2 use separate profiles; replacing one with the other is not a profile migration.
 
-The digest comes from the authenticated GitHub API over TLS. This detects corrupt
-or substituted downloads relative to that metadata. It is **not a publisher
-signature** and does not protect against a compromised GitHub repository or
-release account. There is no Authenticode or detached-signature verification in
-this updater; adding it requires release signing and a trusted publisher key.
-Code already running as the same Windows user is outside this trust boundary.
+## Release integrity and limits
 
-GitHub computes asset digests for uploaded release assets; see the
-[GitHub release asset API](https://docs.github.com/en/rest/releases/assets).
-Releases without a digest cannot be installed through the portable updater.
-The release workflow does not need a separate checksum upload. WinGet continues
-to perform installation through its own upgrade command.
+The release workflow builds the tagged commit using the lockfile and Rust 1.95.0,
+checks the version, writes SHA256SUMS.txt, and uploads an EXE plus checksum as a draft.
+Prereleases are not marked Latest or submitted to WinGet. The draft is published
+after its assets and metadata are verified.
 
-## Tests
+A checksum detects corruption relative to the published file; it is not an
+Authenticode signature or protection against a compromised publishing account.
+CI and local binaries built from the same source may differ; only matching hashes
+prove identical files. Check the checksum shipped with the downloaded release.
 
-Run `cargo test --locked updater` on Windows. Tests exercise metadata selection,
-SemVer precedence, streamed size limits, known SHA-256 vectors, corrupt and
-truncated bodies, interrupted and failed I/O, partial-file cleanup, helper
-arguments, and Windows file locking. Tests do not download or execute updates.
-The release workflow runs these tests before building a release.
+`cargo +1.95.0 test --locked updater` covers informational-release safeguards.
+There is no portable download/install helper in this fork.

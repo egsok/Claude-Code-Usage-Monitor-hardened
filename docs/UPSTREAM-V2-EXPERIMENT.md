@@ -1,5 +1,15 @@
 # Hardened upstream v2 experiment
 
+## Prerelease publication — 2026-11-12
+
+`2.15.14-hardened.4` is the first packaged prerelease of this branch.
+[Release and downloads](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.4) ·
+[release notes](../.github/release-notes/v2.15.14-hardened.4.md).
+The user authorized pushing the branches and publishing this prerelease on November 12.
+V2 remains separate from main and is not the Latest stable release or a WinGet package.
+The sections below record earlier local installation and validation snapshots;
+their old publication restrictions and installed versions describe those dates.
+
 ## Local passive polling update — 2026-11-11
 
 Version `2.15.14-hardened.4` removes all Claude Messages API probes, including

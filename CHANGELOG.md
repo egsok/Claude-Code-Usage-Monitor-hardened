@@ -4,6 +4,31 @@ Notable changes to Claude Code Usage Monitor are documented here, newest first.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), with
 changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
+## [2.15.14-hardened.4] - 2026-11-12
+
+First packaged prerelease of the hardened v2 branch. See the
+[release notes](.github/release-notes/v2.15.14-hardened.4.md) for installation and validation limits.
+
+### Changed
+
+- Claude uses only GET `/api/oauth/usage`, including Desktop and account-profile paths.
+- Automatic cycles wait at least the selected interval after the previous cycle completes.
+- Manual refresh respects full server Retry-After, including delays over 24 hours.
+- Unknown Claude reset times display `--`; stale readings retain `~`.
+
+### Removed
+
+- Messages API probes, model fallback and probes to fill missing reset fields.
+- Five-second reset polling, short error retries and immediate Claude retries on credential rotation.
+
+### Preserved from the hardened v2 experiment
+
+- Native Studio/themes, isolated v2 profile/startup, independent monitor positions/DPI,
+  account caches and auth pause; no agent CLI launch or executable self-update.
+
+The entries below are **upstream history**, not a claim that every original
+behavior (such as automatic token refresh) remains enabled in this fork.
+
 ## [2.15.14] - 2026-09-24
 
 ### Fixed

@@ -21,10 +21,10 @@ menu beside the clock.
 You can also open the dashboard from PowerShell:
 
 ```powershell
-claude-code-usage-monitor --dashboard
+claude-code-usage-monitor --studio
 ```
 
-For a portable download, run `.\claude-code-usage-monitor.exe --dashboard` from
+For a portable download, run `.\claude-code-usage-monitor.exe --studio` from
 the folder containing the executable.
 
 ## Duplicate and customise a built-in theme
@@ -74,7 +74,7 @@ the selected theme; your saved custom copy remains available in the dropdown.
 Custom theme files are stored in:
 
 ```text
-%APPDATA%\ClaudeCodeUsageMonitor\themes
+%APPDATA%\ClaudeCodeUsageMonitorHardenedUpstream2\themes
 ```
 
 ## Choose providers and refresh usage

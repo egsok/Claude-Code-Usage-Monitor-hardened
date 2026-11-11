@@ -5,12 +5,13 @@ provider polling, resilient cached usage, Fable display and independently positi
 monitor copies. It uses a separate application directory and profile; `main`
 remains on stable v1.7.0 while this branch is tried in daily use.
 
-**Start here:** [experiment notes, build and validation](docs/UPSTREAM-V2-EXPERIMENT.md).
+**Download:** [2.15.14-hardened.4 prerelease](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.4).
+**Changes:** [release notes](.github/release-notes/v2.15.14-hardened.4.md) · [validation and history](docs/UPSTREAM-V2-EXPERIMENT.md).
 The current build is `2.15.14-hardened.4`, with opt-in Windows startup, a compact
 three-row Claude theme and a switch for automatic movement above the taskbar.
 The experiment never starts provider agent CLIs, refreshes OAuth tokens, or installs
-updates. Windows startup uses a separate v2 registration. Upstream installation
-and update instructions below do not apply to this experimental build.
+updates. Windows startup uses a separate v2 registration. There is no automatic
+portable updater and no WinGet package for this experimental channel.
 
 Claude statistics use only `GET /api/oauth/usage`: no Messages API probes,
 including when reset fields are absent. Automatic cycles wait at least the selected
@@ -48,15 +49,29 @@ Claude Code credentials can be detected from the CLI, Claude desktop app, or WSL
 
 ## Installation
 
-Install the latest release with WinGet:
+Download `claude-code-usage-monitor.exe` and `SHA256SUMS.txt` from the
+[hardened v2 prerelease](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.4).
+Compare `Get-FileHash .\claude-code-usage-monitor.exe -Algorithm SHA256` with the checksum file.
 
-```powershell
-winget install CodeZeno.ClaudeCodeUsageMonitor
+For a new v2 installation, use a stable location such as:
+
+```text
+%LOCALAPPDATA%\Programs\ClaudeCodeUsageMonitorHardenedUpstream2\claude-code-usage-monitor.exe
 ```
 
-Alternatively, download `claude-code-usage-monitor.exe` from [GitHub Releases](https://github.com/CodeZeno/Claude-Code-Usage-Monitor/releases).
+For an existing v2 installation, close the monitor, keep a copy of the previous EXE,
+and replace it **at the same path and filename**. This preserves path-based proxy/TUN
+rules and the existing startup entry. Start the new EXE normally. Do not delete the
+profile or provider credentials. The application does not change network routing.
 
-See [updater verification](docs/updater.md) for the portable updater's integrity checks and trust boundary.
+V2 uses `%APPDATA%\ClaudeCodeUsageMonitorHardenedUpstream2`, separate from v1.
+It does not automatically import a v1 profile. If running v1, explicitly choose
+which version should start with Windows; do not enable both accidentally.
+The compact three-row theme is available at
+[src/themes/hardened-claude-three-rows.json](src/themes/hardened-claude-three-rows.json)
+for manual import into Studio; a fresh profile does not include the author's settings.
+
+There is no WinGet release for v2. See [update policy](docs/updater.md).
 
 ## Usage
 
@@ -69,7 +84,7 @@ claude-code-usage-monitor
 Open the settings dashboard directly:
 
 ```powershell
-claude-code-usage-monitor --dashboard
+claude-code-usage-monitor --studio
 ```
 
 Use the dashboard to select providers, change the refresh interval, choose a display, enable startup, or customize the widget. **Settings > Display > Usage direction** switches the default theme and other themes that support this setting between showing what has been used and what is left, with Used as the default. Selecting Remaining makes a fresh limit read 100% and drain as you work.
@@ -108,7 +123,7 @@ Grok Build usage comes from the session the CLI stores in `%USERPROFILE%\.grok\a
 
 The monitor reads local sign-in credentials for enabled providers and sends usage requests directly to their official services. It has no backend service, collects no telemetry, and does not upload credentials or project files.
 
-Credentials are read without modifying the provider files that contain them. When Grok Build rejects a stored token, the monitor asks the Grok CLI to refresh its own session rather than rewriting `auth.json` itself. OpenCode Go credentials saved in a JSON configuration file are plain text and should be protected like a browser session cookie.
+Credentials are read without modifying the provider files that contain them. Rejected credentials must be renewed in the provider application by the user; the monitor never launches an agent CLI or refreshes OAuth tokens itself. OpenCode Go credentials saved in a JSON configuration file are plain text and should be protected like a browser session cookie.
 
 ## Troubleshooting
 
@@ -127,7 +142,7 @@ Run diagnostics with:
 claude-code-usage-monitor --diagnose
 ```
 
-The diagnostic log is written to `%TEMP%\claude-code-usage-monitor.log`. Application settings are stored in `%APPDATA%\ClaudeCodeUsageMonitor\settings.json`.
+The diagnostic log is written to `%TEMP%\claude-code-usage-monitor-hardened-upstream2.log`. Application settings are stored in `%APPDATA%\ClaudeCodeUsageMonitorHardenedUpstream2\settings.json`.
 
 If the app unexpectedly closes because of a Rust panic, it automatically appends
 the panic message, source location, and thread details to the same log, even when
@@ -141,7 +156,7 @@ Report suspected vulnerabilities privately using [SECURITY.md](SECURITY.md).
 Install [Rust via rustup](https://www.rust-lang.org/tools/install), then run:
 
 ```powershell
-cargo build --release
+cargo +1.95.0 build --release --locked
 ```
 
 The repository pins Rust 1.95.0 in `rust-toolchain.toml`; rustup automatically
