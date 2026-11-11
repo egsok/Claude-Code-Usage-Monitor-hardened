@@ -1,14 +1,20 @@
 # Hardened upstream v2 experiment
 
-## Prerelease publication — 2026-11-12
+## Release preparation — 2026-11-12
 
-`2.15.14-hardened.4` is the first packaged prerelease of this branch.
-[Release and downloads](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.4) ·
-[release notes](../.github/release-notes/v2.15.14-hardened.4.md).
-The user authorized pushing the branches and publishing this prerelease on November 12.
-V2 remains separate from main and is not the Latest stable release or a WinGet package.
-The sections below record earlier local installation and validation snapshots;
-their old publication restrictions and installed versions describe those dates.
+Tag `v2.15.14-hardened.4` was pushed, but its release workflow stopped at the
+dependency gate: webpki-root-certs, zip vulnerabilities and yanked clipboard-win.
+No GitHub Release or release binary was published. The tag is not rewritten.
+
+Candidate `2.15.14-hardened.5` updates these dependencies and rustix, adapts ZIP
+entry-name handling, and fixes a Windows race in the local HTTP fixture.
+439 offline tests, fmt and strict Clippy pass; three live tests remain skipped.
+The user requested local testing before publication. Installed `.4` remains
+unchanged pending desktop acceptance; the `.5` candidate notes are
+[here](../.github/release-notes/v2.15.14-hardened.5.md).
+V2 stays separate from main; no merge, Latest promotion or WinGet package.
+
+The sections below are historical installation and validation snapshots.
 
 ## Local passive polling update — 2026-11-11
 

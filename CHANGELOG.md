@@ -4,9 +4,20 @@ Notable changes to Claude Code Usage Monitor are documented here, newest first.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), with
 changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
+## [2.15.14-hardened.5] - Unreleased
+
+- Update zip to 9.5.1, webpki-root-certs to 1.0.12, clipboard-win to 5.4.3,
+  and rustix to 1.1.6 to address the dependency gate findings.
+- Adapt theme import to fallible ZIP entry names; test compressed package decoding
+  and corrupt-name rejection without touching the user profile.
+- Fix Windows nonblocking socket inheritance in the local HTTP contract test.
+- Keep the passive polling behavior from .4. Local desktop acceptance precedes publication.
+
+See [candidate release notes](.github/release-notes/v2.15.14-hardened.5.md).
+
 ## [2.15.14-hardened.4] - 2026-11-12
 
-First packaged prerelease of the hardened v2 branch. See the
+Locally installed build; tag pushed, but release blocked by dependency checks. See the
 [release notes](.github/release-notes/v2.15.14-hardened.4.md) for installation and validation limits.
 
 ### Changed

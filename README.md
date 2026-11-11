@@ -5,9 +5,10 @@ provider polling, resilient cached usage, Fable display and independently positi
 monitor copies. It uses a separate application directory and profile; `main`
 remains on stable v1.7.0 while this branch is tried in daily use.
 
-**Download:** [2.15.14-hardened.4 prerelease](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.4).
-**Changes:** [release notes](.github/release-notes/v2.15.14-hardened.4.md) · [validation and history](docs/UPSTREAM-V2-EXPERIMENT.md).
-The current build is `2.15.14-hardened.4`, with opt-in Windows startup, a compact
+**Release status:** `2.15.14-hardened.5` is a local release candidate awaiting desktop acceptance and CI.
+The `.4` tag exists, but its release was blocked by dependency checks; no v2 download is published yet.
+**Changes:** [release notes](.github/release-notes/v2.15.14-hardened.5.md) · [validation and history](docs/UPSTREAM-V2-EXPERIMENT.md).
+The current candidate is `2.15.14-hardened.5`, with opt-in Windows startup, a compact
 three-row Claude theme and a switch for automatic movement above the taskbar.
 The experiment never starts provider agent CLIs, refreshes OAuth tokens, or installs
 updates. Windows startup uses a separate v2 registration. There is no automatic
@@ -49,8 +50,9 @@ Claude Code credentials can be detected from the CLI, Claude desktop app, or WSL
 
 ## Installation
 
-Download `claude-code-usage-monitor.exe` and `SHA256SUMS.txt` from the
-[hardened v2 prerelease](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.4).
+After publication, download `claude-code-usage-monitor.exe` and `SHA256SUMS.txt`
+from the [fork releases](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases).
+Until then, these are installation instructions for the upcoming v2 package.
 Compare `Get-FileHash .\claude-code-usage-monitor.exe -Algorithm SHA256` with the checksum file.
 
 For a new v2 installation, use a stable location such as:

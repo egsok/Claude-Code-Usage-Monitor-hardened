@@ -196,7 +196,7 @@ fn decode_package<R: Read + Seek>(reader: R) -> Result<DecodedPackage, String> {
         if entry.is_dir() {
             continue;
         }
-        let name = safe_entry_name(entry.name())?;
+        let name = safe_entry_name(&entry.name().map_err(|error| error.to_string())?)?;
         if !names.insert(name.clone()) {
             return Err(format!("Theme package contains duplicate entry '{name}'"));
         }
@@ -379,7 +379,8 @@ mod tests {
         let mut bytes = Cursor::new(Vec::new());
         {
             let mut writer = ZipWriter::new(&mut bytes);
-            let options = SimpleFileOptions::default();
+            let options =
+                SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
             writer.start_file(THEME_ENTRY, options).unwrap();
             writer
                 .write_all(&serde_json::to_vec(&theme).unwrap())
@@ -394,6 +395,33 @@ mod tests {
         let decoded = decode_package(bytes).unwrap();
         assert_eq!(decoded.theme.id, theme.id);
         assert_eq!(decoded.context_menu.unwrap().id, menu.id);
+    }
+
+    #[test]
+    fn package_decoder_rejects_corrupted_entry_name() {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(THEME_ENTRY, SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"{}").unwrap();
+        let mut bytes = writer.finish().unwrap().into_inner();
+        // Mark both headers as UTF-8, then corrupt the filename in each header.
+        for (signature, flags_offset) in [(b"PK\x03\x04", 6), (b"PK\x01\x02", 8)] {
+            let header = bytes.windows(4).position(|s| s == signature).unwrap();
+            bytes[header + flags_offset + 1] |= 0x08;
+        }
+        let names: Vec<_> = bytes
+            .windows(THEME_ENTRY.len())
+            .enumerate()
+            .filter_map(|(index, name)| (name == THEME_ENTRY.as_bytes()).then_some(index))
+            .collect();
+        assert_eq!(names.len(), 2);
+        for index in names {
+            bytes[index] = 0xff;
+        }
+        // ZIP readers may fall back to CP437 for malformed UTF-8. Either way,
+        // the corrupt entry must never be accepted as the package theme.
+        assert!(decode_package(Cursor::new(bytes)).is_err());
     }
 
     #[test]

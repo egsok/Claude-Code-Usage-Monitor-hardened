@@ -1,6 +1,6 @@
 [package]
 name = "claude-code-usage-monitor"
-version = "2.15.14-hardened.4"
+version = "2.15.14-hardened.5"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
@@ -31,7 +31,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 eframe = { version = "0.36", default-features = false, features = ["glow"] }
 lucide-icons = "1.30"
 raw-window-handle = "0.6"
-zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "9.5.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dependencies.windows]
 version = "0.62"
