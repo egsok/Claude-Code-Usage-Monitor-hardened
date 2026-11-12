@@ -15,17 +15,16 @@ allowed to execute and update on the user's machine.
 
 ## Release channels / Версии
 
-- **Experimental v2:** [2.15.14-hardened.5](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.5)
-  — Claude usage-only polling, bounded automatic refresh, native Studio and multiple taskbar copies.
-  [v2 README and installation](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/blob/agent/upstream-v2-hardened-experiment/README.md).
-- **Upstream integration candidate:** `2.23.6-hardened.1` in
-  [a separate branch](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/tree/agent/upstream-v2.23-hardened-integration).
-  Installed locally for daily evaluation, not published as a release;
+- **Experimental v2:** [2.23.6-hardened.1](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.23.6-hardened.1)
+  — upstream v2.23.6 with usage-only Claude polling, bounded refresh, updated Studio
+  and native TLS. Installed locally; published as a prerelease with known display limitations.
+  [v2 README and installation](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/blob/agent/upstream-v2.23-hardened-integration/README.md);
   [validation and remaining checks](UPSTREAM-INTEGRATION-2026-11-12.md).
+- **Previous v2 / rollback:** [2.15.14-hardened.5](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.5).
 - **Stable published release:** [v1.6.4](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v1.6.4).
   This `main` branch contains v1.7.0 source; it has not been merged with v2.
 
-**Важно:** в опубликованной v2 `2.15.14-hardened.5` генерационные пробы Claude
+**Важно:** в опубликованной v2 `2.23.6-hardened.1` генерационные пробы Claude
 удалены и проверены локальными тестами. В v1 остаётся резервный запрос Messages API. V2 публикуется
 как prerelease с отдельным профилем; она не заменяет стабильный канал автоматически.
 The v1 documentation below describes v1, including its Messages API fallback.
