@@ -1,11 +1,12 @@
 # Claude Code Usage Monitor — Hardened v2 Experiment
 
 This branch integrates upstream v2.23.6 with the hardened fork's passive
-polling, atomic settings and independent monitor copies. Candidate version:
-`2.23.6-hardened.1`. Installed locally for daily evaluation after explicit approval;
-not published as a release. Full taskbar/multi-monitor/soak acceptance remains pending.
+polling, atomic settings and independent monitor copies. Prerelease version:
+`2.23.6-hardened.1`, installed locally for daily evaluation.
+Full taskbar/multi-monitor/soak acceptance remains pending; see the release notes.
 
-**Published experimental build:** [2.15.14-hardened.5](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.5).
+**Experimental release:** [2.23.6-hardened.1](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.23.6-hardened.1).
+**Release notes and known limitations:** [details](.github/release-notes/v2.23.6-hardened.1.md).
 **Integration:** [decisions and validation](docs/UPSTREAM-V2.23-INTEGRATION.md).
 This candidate keeps the separate v2 profile/startup identity. It does not launch
 provider agents, refresh credentials, or download/replace its executable.
@@ -46,8 +47,7 @@ Claude Code credentials can be detected from the CLI, Claude desktop app, or WSL
 
 ## Installation
 
-Download the published `.5` EXE and checksum from the release linked above.
-The `2.23.6-hardened.1` integration candidate is not yet a release.
+Download the EXE and checksum from the prerelease linked above.
 Compare `Get-FileHash .\claude-code-usage-monitor.exe -Algorithm SHA256` with the checksum file.
 
 For a new v2 installation, use a stable location such as:

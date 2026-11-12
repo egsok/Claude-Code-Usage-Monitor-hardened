@@ -4,12 +4,22 @@ Notable changes to Claude Code Usage Monitor are documented here, newest first.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), with
 changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
-## [2.23.6-hardened.1] - Unreleased
+## [2.23.6-hardened.1] - 2026-11-12
 
-Local integration candidate for upstream v2.23.6. Not installed or published.
+Experimental release integrating upstream v2.23.6; installed for daily evaluation.
 Preserves passive provider polling, full server cooldowns, isolated profile/startup,
 manual updates, atomic settings, device-path monitor identity and independent copies.
 Validation and conflict decisions are recorded in docs/UPSTREAM-V2.23-INTEGRATION.md.
+
+- Update Studio to eframe/egui 0.37 and networking to ureq 3.5.1 with native TLS.
+- Read existing fresh Desktop credentials when the default CLI token has expired.
+- Preserve hardened polling and independent monitor settings; fix update completion
+  routing and taskbar lock handling for managed copies.
+- Remove the unused dirs dependency chain; retain zip/rustix security fixes.
+- 584 local tests pass; four live tests skipped. Side-monitor clipping during
+  Computer Use remains unexplained; full DPI and soak acceptance are pending.
+
+See [release notes](.github/release-notes/v2.23.6-hardened.1.md).
 
 ## [2.15.14-hardened.5] - 2026-11-12
 
