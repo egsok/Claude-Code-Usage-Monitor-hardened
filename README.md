@@ -5,10 +5,11 @@ provider polling, resilient cached usage, Fable display and independently positi
 monitor copies. It uses a separate application directory and profile; `main`
 remains on stable v1.7.0 while this branch is tried in daily use.
 
-**Release status:** `2.15.14-hardened.5` is a local release candidate awaiting desktop acceptance and CI.
-The `.4` tag exists, but its release was blocked by dependency checks; no v2 download is published yet.
+**Release status:** [2.15.14-hardened.5 is published as a prerelease](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.5).
+Security and release CI passed; the published EXE matches the locally tested installation.
+The `.4` tag remains, but no `.4` release was published after its dependency checks failed.
 **Changes:** [release notes](.github/release-notes/v2.15.14-hardened.5.md) · [validation and history](docs/UPSTREAM-V2-EXPERIMENT.md).
-The current candidate is `2.15.14-hardened.5`, with opt-in Windows startup, a compact
+The current published build is `2.15.14-hardened.5`, with opt-in Windows startup, a compact
 three-row Claude theme and a switch for automatic movement above the taskbar.
 The experiment never starts provider agent CLIs, refreshes OAuth tokens, or installs
 updates. Windows startup uses a separate v2 registration. There is no automatic

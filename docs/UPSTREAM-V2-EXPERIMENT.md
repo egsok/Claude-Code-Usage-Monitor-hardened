@@ -1,18 +1,24 @@
 # Hardened upstream v2 experiment
 
-## Release preparation — 2026-11-12
+## Published prerelease — 2026-11-12
 
 Tag `v2.15.14-hardened.4` was pushed, but its release workflow stopped at the
 dependency gate: webpki-root-certs, zip vulnerabilities and yanked clipboard-win.
 No GitHub Release or release binary was published. The tag is not rewritten.
 
-Candidate `2.15.14-hardened.5` updates these dependencies and rustix, adapts ZIP
+Published `2.15.14-hardened.5` updates these dependencies and rustix, adapts ZIP
 entry-name handling, and fixes a Windows race in the local HTTP fixture.
-439 offline tests, fmt and strict Clippy pass; three live tests remain skipped.
-The user requested local testing before publication. Installed `.4` remains
-unchanged pending desktop acceptance; the `.5` candidate notes are
+439 offline tests, fmt, strict Clippy and release build pass; three live tests remain skipped.
+The user requested local testing before publication. Installed `.5` matches the tested local build; settings and startup are unchanged.
+Normal Claude/Codex usage and Studio rendering were observed; full tray/DPI and
+extended soak remain unverified; the `.5` release notes are
 [here](../.github/release-notes/v2.15.14-hardened.5.md).
 V2 stays separate from main; no merge, Latest promotion or WinGet package.
+Security CI 43111541837 and release CI 43112220607 passed. The published asset
+is the locally tested EXE, SHA-256
+`5F44101A0E0B7552B95266A82BDD3B0A36AC2CF8873B32AB0D3873EBDB250099`.
+The CI-produced EXE differed; release notes disclose this provenance rather than
+claiming reproducible binaries.
 
 The sections below are historical installation and validation snapshots.
 
