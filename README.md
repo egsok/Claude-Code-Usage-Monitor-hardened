@@ -15,16 +15,18 @@ allowed to execute and update on the user's machine.
 
 ## Release channels / Версии
 
-- **Latest v2:** [2.23.6-hardened.1](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.23.6-hardened.1)
+- **Latest v2:** [2.23.6-hardened.2](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.23.6-hardened.2)
   — upstream v2.23.6 with usage-only Claude polling, bounded refresh, updated Studio
-  and native TLS. Installed locally; promoted to Latest with known display limitations.
+  and native TLS. Includes **Hardened Compact · 3 rows**, selectable in
+  **Open Dashboard → Theme Studio → Theme** without importing JSON.
+  Existing theme choices and edits are preserved. [Release checks](RELEASE-HARDENED2-2026-11-12.md).
   [v2 README and installation](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/blob/agent/upstream-v2.23-hardened-integration/README.md);
   [validation and remaining checks](UPSTREAM-INTEGRATION-2026-11-12.md).
 - **Previous v2 / rollback:** [2.15.14-hardened.5](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.5).
 - **Previous v1 release:** [v1.6.4](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v1.6.4).
   This `main` branch contains v1.7.0 source; it has not been merged with v2.
 
-**Важно:** в опубликованной v2 `2.23.6-hardened.1` генерационные пробы Claude
+**Важно:** в опубликованной v2 `2.23.6-hardened.2` генерационные пробы Claude
 удалены и проверены локальными тестами. В v1 остаётся резервный запрос Messages API. V2 публикуется
 как Latest с отдельным профилем. Portable-приложение не заменяет EXE автоматически;
 переход с v1 не переносит её профиль. Ограничения визуальной проверки указаны в релизе.
