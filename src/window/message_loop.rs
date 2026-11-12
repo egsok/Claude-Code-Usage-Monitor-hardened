@@ -36,7 +36,20 @@ pub(super) unsafe extern "system" fn wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match msg {
+        WM_MOUSEHOVER => {
+            widget_tooltip::show(hwnd);
+            LRESULT(0)
+        }
         WM_NCHITTEST => LRESULT(HTCLIENT as isize),
+        // DefWindowProc sends WM_MOUSEACTIVATE to a child's parent first. For a
+        // taskbar-hosted surface that is a synchronous call into Shell_TrayWnd
+        // on every button press; a hang dump caught Explorer's taskbar thread
+        // stuck in UI Automation while handling exactly that message (from a
+        // right-button press), with this thread waiting on it. The surface is
+        // never activated anyway, so answer here and keep Explorer out of it.
+        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        // Same parent forwarding: the surface has no use for them either.
+        WM_MOUSEWHEEL | WM_MOUSEHWHEEL | WM_APPCOMMAND | WM_CONTEXTMENU => LRESULT(0),
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
             let _ = BeginPaint(hwnd, &mut ps);
@@ -48,17 +61,13 @@ pub(super) unsafe extern "system" fn wnd_proc(
             managed::refresh_topology();
             refresh_theme_host_geometry();
             if msg == WM_DPICHANGED_MSG {
-                let new_dpi = (wparam.0 & 0xFFFF) as u32;
-                CURRENT_DPI.store(new_dpi, Ordering::Relaxed);
+                CURRENT_DPI.store((wparam.0 & 0xFFFF) as u32, Ordering::Relaxed);
             }
             if msg == WM_SETTINGCHANGE {
                 check_theme_change();
                 check_language_change();
             }
-            refresh_dpi();
-            position_at_taskbar();
-            render_layered();
-            sync_tray_icon(hwnd);
+            lifecycle::schedule_reconcile(controller_for(hwnd));
             LRESULT(0)
         }
         WM_TIMER => {
@@ -103,7 +112,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     managed::sync_visibility();
                 }
                 TIMER_MOUSE_CLICK => {
-                    let _ = KillTimer(Some(hwnd), TIMER_MOUSE_CLICK);
+                    let _ = kill_controller_timer(Some(hwnd), TIMER_MOUSE_CLICK);
                     let pending = lock_state()
                         .as_mut()
                         .and_then(|state| state.pending_mouse_click.take());
@@ -118,10 +127,13 @@ pub(super) unsafe extern "system" fn wnd_proc(
                 TIMER_TRAY_HOVER => {
                     clear_tray_mouse_hover_if_left(hwnd);
                 }
+                widget_tooltip::REFRESH_TIMER => widget_tooltip::refresh(),
                 TIMER_TRAY_REPOSITION => {
-                    let _ = KillTimer(Some(hwnd), TIMER_TRAY_REPOSITION);
-                    refresh_theme_host_geometry();
-                    position_at_taskbar();
+                    let _ = kill_controller_timer(Some(hwnd), TIMER_TRAY_REPOSITION);
+                    lifecycle::reconcile_surfaces();
+                }
+                TIMER_CROSSFADE_SCHEDULE => {
+                    arm_crossfade_schedule(hwnd);
                     render_layered();
                 }
                 _ => {}
@@ -167,11 +179,11 @@ pub(super) unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         WM_APP_OPEN_DASHBOARD => {
-            crate::dashboard::show(hwnd);
+            crate::dashboard::show(controller_for(hwnd));
             LRESULT(0)
         }
-        WM_APP_QUIT => {
-            let _ = DestroyWindow(hwnd);
+        WM_CLOSE | WM_APP_QUIT => {
+            let _ = PostMessageW(Some(controller_for(hwnd)), WM_CLOSE, WPARAM(0), LPARAM(0));
             LRESULT(0)
         }
         native_interop::WM_APP_UPDATE_ACTION => {
@@ -186,9 +198,12 @@ pub(super) unsafe extern "system" fn wnd_proc(
             schedule_auto_update_check(hwnd);
             LRESULT(0)
         }
-        WM_SETCURSOR if set_surface_cursor(hwnd) => LRESULT(1),
-        WM_SETCURSOR => DefWindowProcW(hwnd, msg, wparam, lparam),
+        WM_SETCURSOR => {
+            set_surface_cursor(hwnd);
+            LRESULT(1)
+        }
         WM_LBUTTONDOWN => {
+            widget_tooltip::hide();
             unsafe {
                 let _ = SetCapture(hwnd);
             }
@@ -377,12 +392,14 @@ pub(super) unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         WM_LBUTTONDBLCLK => {
+            widget_tooltip::hide();
             if let Some((surface, object)) = mouse_target_at(hwnd, lparam) {
                 dispatch_double_click(hwnd, surface, object);
             }
             LRESULT(0)
         }
         WM_RBUTTONUP => {
+            widget_tooltip::hide();
             if let Some((surface, object)) = mouse_target_at(hwnd, lparam) {
                 let _ = dispatch_mouse_event(surface, &object, MouseEventKind::RightClick);
             }
@@ -461,8 +478,12 @@ pub(super) unsafe extern "system" fn wnd_proc(
 
                 if let Some((target_idx, taskbar, free_dock_slot)) = target_dock {
                     let displays = native_interop::find_monitors();
-                    let handle =
-                        unsafe { MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) };
+                    let Some(handle) =
+                        native_interop::monitor_for_taskbar(&taskbars, &displays, taskbar.hwnd)
+                    else {
+                        render_layered();
+                        return LRESULT(0);
+                    };
                     let Some(monitor_index) =
                         positioning::monitor_index_for_handle(&displays, handle)
                     else {
@@ -502,12 +523,14 @@ pub(super) unsafe extern "system" fn wnd_proc(
                             s.is_snapped = false;
                             s.taskbar_index = target_idx;
                             s.auto_ejected = false;
+                            s.auto_ejected_for_capacity = false;
                             s.auto_ejected_origin = None;
                             s.auto_ejected_host = None;
                             s.tray_offset = tray_offset;
                             s.placement_override = Some(PlacementOverride {
                                 nest: "taskbar".into(),
                                 monitor_index,
+                                monitor_device: native_interop::monitor_device_name(handle),
                                 screen_x,
                                 screen_y,
                                 tray_offset,
@@ -520,6 +543,38 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     position_at_taskbar();
                     render_layered();
                 } else {
+                    // Locked widgets cannot be dropped as floating: return them
+                    // to the bar so they can only be moved along it.
+                    let locked = lock_state().as_ref().is_some_and(taskbar_lock_applies);
+                    if locked {
+                        let taskbar = {
+                            let mut state = lock_state();
+                            state.as_mut().and_then(|s| {
+                                s.embedded = true;
+                                s.is_switching_window_style = true;
+                                s.is_snapped = false;
+                                s.auto_ejected = false;
+                                s.auto_ejected_for_capacity = false;
+                                s.auto_ejected_origin = None;
+                                s.auto_ejected_host = None;
+                                // The drag leaves the configured taskbar host
+                                // and saved dock placement unchanged.
+                                s.taskbar_hwnd.map(|h| h.to_hwnd())
+                            })
+                        };
+                        // SetParent/style changes can synchronously re-enter
+                        // wnd_proc. Release STATE before calling Win32.
+                        if let Some(taskbar) = taskbar {
+                            native_interop::embed_as_child(hwnd, taskbar);
+                        }
+                        if let Some(s) = lock_state().as_mut() {
+                            s.is_switching_window_style = false;
+                        }
+                        save_state_settings();
+                        position_at_taskbar();
+                        render_layered();
+                        return LRESULT(0);
+                    }
                     let displays = native_interop::find_monitors();
                     let (monitor_idx, display) = positioning::monitor_for_point(&displays, pt);
                     let floating_frame = lock_state().as_ref().and_then(|s| {
@@ -548,11 +603,13 @@ pub(super) unsafe extern "system" fn wnd_proc(
                             s.embedded = false;
                             s.is_snapped = false;
                             s.auto_ejected = false;
+                            s.auto_ejected_for_capacity = false;
                             s.auto_ejected_origin = None;
                             s.auto_ejected_host = None;
                             s.placement_override = Some(PlacementOverride {
                                 nest: "floating".into(),
                                 monitor_index: monitor_idx,
+                                monitor_device: native_interop::monitor_device_name(display.handle),
                                 screen_x: clamped_x,
                                 screen_y: clamped_y,
                                 tray_offset: 0,
@@ -621,6 +678,10 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     .taskbar_hwnd
                     .and_then(|h| native_interop::get_window_rect_safe(h.to_hwnd()))
                     .unwrap_or_default();
+                // Capacity fallback can return as soon as the authored layout
+                // fits. App collisions retain their existing extra clearance.
+                s.auto_ejected_for_capacity =
+                    positioning::taskbar_surface_is_clipped(taskbar_rect, widget_rect);
 
                 let displays = native_interop::find_monitors();
                 let mon = displays
@@ -669,10 +730,13 @@ pub(super) unsafe extern "system" fn wnd_proc(
                         SWP_NOACTIVATE,
                     );
                 }
-                diagnose::log("taskbar collision: auto-ejected widget to floating");
+                diagnose::log(format!(
+                    "taskbar collision: auto-ejected widget to floating taskbar={taskbar_rect:?} widget={widget_rect:?}"
+                ));
                 render_layered();
             } else if action == 0 && s.auto_ejected {
                 s.auto_ejected = false;
+                s.auto_ejected_for_capacity = false;
                 s.auto_ejected_origin = None;
                 s.auto_ejected_host = None;
                 let taskbar_hwnd = s.taskbar_hwnd.map(|h| h.to_hwnd());
@@ -687,6 +751,11 @@ pub(super) unsafe extern "system" fn wnd_proc(
                 diagnose::log("taskbar collision resolved: re-docked widget to taskbar");
                 position_at_taskbar();
                 render_layered();
+            } else if action == TASKBAR_COLLISION_REPOSITION {
+                drop(state);
+                diagnose::log("taskbar geometry changed: repositioning docked widget");
+                position_at_taskbar();
+                render_layered();
             }
             LRESULT(0)
         }
@@ -694,7 +763,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
             let id = wparam.0 as u16;
             match id {
                 IDM_DASHBOARD => {
-                    crate::dashboard::show(hwnd);
+                    crate::dashboard::show(controller_for(hwnd));
                 }
                 1 => {
                     {
@@ -708,15 +777,8 @@ pub(super) unsafe extern "system" fn wnd_proc(
                 }
                 IDM_VERSION_ACTION => perform_update_action(hwnd),
                 2 => {
-                    let hook = {
-                        let state = lock_state();
-                        state.as_ref().and_then(|s| s.win_event_hook)
-                    };
-                    if let Some(h) = hook {
-                        native_interop::unhook_win_event(h.to_hook());
-                    }
-                    crate::dashboard::close_existing();
-                    let _ = DestroyWindow(hwnd);
+                    let _ =
+                        PostMessageW(Some(controller_for(hwnd)), WM_CLOSE, WPARAM(0), LPARAM(0));
                 }
                 IDM_START_WITH_WINDOWS => {
                     if let Err(error) = set_startup_enabled(!is_startup_enabled()) {
@@ -725,6 +787,9 @@ pub(super) unsafe extern "system" fn wnd_proc(
                             .map_or(LanguageId::English, |s| s.language);
                         show_error_message(hwnd, language.text("Start with Windows"), &error);
                     }
+                }
+                IDM_LOCK_TASKBAR => {
+                    toggle_taskbar_lock(hwnd);
                 }
                 IDM_FREQ_1MIN | IDM_FREQ_5MIN | IDM_FREQ_15MIN | IDM_FREQ_1HOUR => {
                     let new_interval = match id {
@@ -742,16 +807,97 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     }
                     save_state_settings();
                     // Reset the poll timer with the new interval
-                    SetTimer(Some(hwnd), TIMER_POLL, new_interval, None);
+                    set_controller_timer(Some(hwnd), TIMER_POLL, new_interval, None);
+                }
+                IDM_PROVIDER_ANTIGRAVITY_GEMINI | IDM_PROVIDER_ANTIGRAVITY_EXTERNAL => {
+                    let mut should_reposition = false;
+                    let mut dual_mode = false;
+                    {
+                        let mut state = lock_state();
+                        if let Some(s) = state.as_mut() {
+                            let is_gemini = id == IDM_PROVIDER_ANTIGRAVITY_GEMINI;
+                            let current = if is_gemini {
+                                s.show_antigravity_gemini
+                            } else {
+                                s.show_antigravity_external
+                            };
+                            let other = if is_gemini {
+                                s.show_antigravity_external
+                            } else {
+                                s.show_antigravity_gemini
+                            };
+                            let target = !current;
+                            // Guard: cannot disable both if Antigravity is the only active provider
+                            if !target
+                                && !other
+                                && s.providers.len() <= 1
+                                && s.providers.contains(ProviderId::Antigravity)
+                            {
+                                // Keep at least one provider active
+                            } else {
+                                if is_gemini {
+                                    s.show_antigravity_gemini = target;
+                                } else {
+                                    s.show_antigravity_external = target;
+                                }
+                                if !target && !other {
+                                    s.providers.set(ProviderId::Antigravity, false);
+                                    should_reposition = true;
+                                } else if !s.providers.contains(ProviderId::Antigravity) {
+                                    s.providers.set(ProviderId::Antigravity, true);
+                                    should_reposition = true;
+                                }
+                                dual_mode = s.show_antigravity_gemini
+                                    && s.show_antigravity_external
+                                    && s.providers.contains(ProviderId::Antigravity);
+                                if !dual_mode {
+                                    unsafe {
+                                        let _ = kill_controller_timer(
+                                            Some(hwnd),
+                                            TIMER_CROSSFADE_SCHEDULE,
+                                        );
+                                    }
+                                    s.crossfade_opacity = 1.0;
+                                }
+                            }
+                        }
+                    }
+                    if dual_mode {
+                        arm_crossfade_schedule(hwnd);
+                    }
+                    save_state_settings();
+                    if should_reposition {
+                        position_at_taskbar();
+                    }
+                    render_layered();
+                    sync_tray_icon(hwnd);
+                    request_poll(hwnd);
                 }
                 id if ProviderId::from_native_menu_command_id(id).is_some() => {
+                    let mut dual_mode = false;
                     {
                         let mut state = lock_state();
                         if let Some(s) = state.as_mut() {
                             let provider = ProviderId::from_native_menu_command_id(id)
                                 .expect("provider menu command was matched above");
-                            s.providers.toggle(provider);
+                            let changed = s.providers.toggle(provider);
+                            if provider == ProviderId::Antigravity && changed {
+                                let enabled = s.providers.contains(ProviderId::Antigravity);
+                                s.show_antigravity_gemini = enabled;
+                                s.show_antigravity_external = enabled;
+                                if !enabled {
+                                    let _ =
+                                        kill_controller_timer(Some(hwnd), TIMER_CROSSFADE_SCHEDULE);
+                                    s.crossfade_opacity = 1.0;
+                                }
+                            }
+                            dual_mode = s.show_antigravity_gemini
+                                && s.show_antigravity_external
+                                && s.providers.contains(ProviderId::Antigravity);
                         }
+                    }
+                    if dual_mode {
+                        arm_crossfade_schedule(hwnd);
                     }
                     save_state_settings();
                     position_at_taskbar();
@@ -783,7 +929,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
             // call has re-entered our window procedure. Return before taking
             // STATE, opening windows, or calling back into Explorer.
             if let Err(error) = PostMessageW(
-                Some(hwnd),
+                Some(controller_for(hwnd)),
                 native_interop::WM_APP_TRAY_DISPATCH,
                 wparam,
                 lparam,
@@ -828,7 +974,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                                 &root_id,
                                 MouseEventKind::DoubleClick,
                             ) {
-                                crate::dashboard::show(hwnd);
+                                crate::dashboard::show(controller_for(hwnd));
                             }
                             return LRESULT(0);
                         }
@@ -840,7 +986,7 @@ pub(super) unsafe extern "system" fn wnd_proc(
                             ) {
                                 dispatch_double_click(hwnd, surface_index, root_id);
                             } else {
-                                crate::dashboard::show(hwnd);
+                                crate::dashboard::show(controller_for(hwnd));
                             }
                             return LRESULT(0);
                         }
@@ -878,31 +1024,11 @@ pub(super) unsafe extern "system" fn wnd_proc(
             // and tray-icon-only themes keep their owner HWND, so restore the
             // registrations when the shell broadcasts its return.
             sync_tray_icon(hwnd);
-            render_layered();
+            lifecycle::schedule_reconcile(controller_for(hwnd));
             LRESULT(0)
         }
         WM_DESTROY => {
-            managed::destroy_surfaces();
-            crate::dashboard::close_existing();
-            crate::desktop_compositor::clear();
-            let (hook, desktop_windows) = {
-                let mut state = lock_state();
-                match state.as_mut() {
-                    Some(state) => (
-                        state.win_event_hook,
-                        std::mem::take(&mut state.desktop_hwnds),
-                    ),
-                    None => (None, Vec::new()),
-                }
-            };
-            if let Some(h) = hook {
-                native_interop::unhook_win_event(h.to_hook());
-            }
-            for window in desktop_windows.into_iter().flatten() {
-                let _ = DestroyWindow(window.to_hwnd());
-            }
-            tray_icon::remove_all(hwnd);
-            PostQuitMessage(0);
+            lifecycle::surface_destroyed(hwnd);
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -980,5 +1106,99 @@ mod tests {
         drop(state);
         worker.join().expect("tray callback test thread");
         result.expect("tray callbacks must return without waiting for STATE");
+    }
+
+    #[test]
+    fn hosted_surface_never_forwards_mouse_messages_to_its_parent() {
+        // Stands in for Shell_TrayWnd: DefWindowProc of a child forwards these
+        // to the parent synchronously, which in production is Explorer.
+        static FORWARDED: AtomicU32 = AtomicU32::new(0);
+        unsafe extern "system" fn parent_proc(
+            hwnd: HWND,
+            msg: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> LRESULT {
+            if matches!(
+                msg,
+                WM_MOUSEACTIVATE
+                    | WM_SETCURSOR
+                    | WM_MOUSEWHEEL
+                    | WM_MOUSEHWHEEL
+                    | WM_APPCOMMAND
+                    | WM_CONTEXTMENU
+            ) {
+                FORWARDED.fetch_add(1, Ordering::SeqCst);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+
+        unsafe {
+            let class = native_interop::wide_str("ClaudeCodeUsageForwardingParentTest");
+            RegisterClassW(&WNDCLASSW {
+                lpfnWndProc: Some(parent_proc),
+                hInstance: GetModuleHandleW(PCWSTR::null()).unwrap().into(),
+                lpszClassName: PCWSTR(class.as_ptr()),
+                ..Default::default()
+            });
+            let parent = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                PCWSTR(class.as_ptr()),
+                PCWSTR::null(),
+                WS_POPUP,
+                0,
+                0,
+                10,
+                10,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let child = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                windows::core::w!("STATIC"),
+                PCWSTR::null(),
+                WS_CHILD,
+                0,
+                0,
+                10,
+                10,
+                Some(parent),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+            // The harness observes forwarding when DefWindowProc handles it.
+            let press = LPARAM(((WM_RBUTTONDOWN as isize) << 16) | HTCLIENT as isize);
+            DefWindowProcW(child, WM_MOUSEACTIVATE, WPARAM(parent.0 as usize), press);
+            assert_eq!(FORWARDED.swap(0, Ordering::SeqCst), 1);
+
+            let hover = LPARAM(((WM_MOUSEMOVE as isize) << 16) | HTCLIENT as isize);
+            let procedures: [WNDPROC; 2] = [Some(wnd_proc), Some(mirror_wnd_proc)];
+            for procedure in procedures.into_iter().flatten() {
+                assert_eq!(
+                    procedure(child, WM_MOUSEACTIVATE, WPARAM(parent.0 as usize), press).0,
+                    MA_NOACTIVATE as isize
+                );
+                assert_eq!(
+                    procedure(child, WM_SETCURSOR, WPARAM(child.0 as usize), hover).0,
+                    1
+                );
+                for msg in [WM_MOUSEWHEEL, WM_MOUSEHWHEEL, WM_APPCOMMAND, WM_CONTEXTMENU] {
+                    assert_eq!(procedure(child, msg, WPARAM(0), LPARAM(0)).0, 0);
+                }
+            }
+            let forwarded = FORWARDED.load(Ordering::SeqCst);
+            let _ = DestroyWindow(child);
+            let _ = DestroyWindow(parent);
+            assert_eq!(
+                forwarded, 0,
+                "surface forwarded a mouse message to its host"
+            );
+        }
     }
 }

@@ -126,7 +126,7 @@ fn poll_dashboard(credentials: &DashboardCredentials) -> Result<UsageData, PollE
         monthly: usage.monthly.as_ref().map(section_from_window),
         credits: None,
         stale: false,
-        ..UsageData::default()
+        ..Default::default()
     })
 }
 
@@ -289,7 +289,7 @@ fn dashboard_config_paths() -> Vec<PathBuf> {
         paths.push(config_home.join("opencode-bar").join("opencode-go.json"));
         paths.push(config_home.join("opencode-quota").join("opencode-go.json"));
     }
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = crate::known_folders::home_dir() {
         paths.push(
             home.join(".config")
                 .join("opencode-bar")

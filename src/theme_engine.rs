@@ -21,6 +21,7 @@ use crate::providers::{ProviderId, ProviderSet, PROVIDER_DESCRIPTORS};
 pub const THEME_SCHEMA_VERSION: u32 = 1;
 pub const CLASSIC_THEME_ID: &str = "classic-usage-widget";
 pub const COMPACT_FLUENT_QUAD_THEME_ID: &str = "compact-fluent-quad";
+pub const CLASSIC_VERTICAL_THEME_ID: &str = "classic-vertical";
 pub const MINECRAFT_THEME_ID: &str = "theme-minecraft";
 
 const BUILTIN_THEME_SOURCES: &[(&str, &str)] = &[
@@ -31,6 +32,10 @@ const BUILTIN_THEME_SOURCES: &[(&str, &str)] = &[
     (
         COMPACT_FLUENT_QUAD_THEME_ID,
         include_str!(concat!(env!("OUT_DIR"), "/compact-fluent-quad.json")),
+    ),
+    (
+        CLASSIC_VERTICAL_THEME_ID,
+        include_str!(concat!(env!("OUT_DIR"), "/classic-vertical.json")),
     ),
 ];
 
@@ -126,6 +131,9 @@ pub struct SceneObject {
     pub border: Option<Stroke>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mouse_events: Option<MouseEvents>,
+    /// Native hover popup for a root surface. Omitted by older/custom themes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tooltip: Option<SurfaceTooltip>,
     #[serde(default)]
     pub corner_radius: Expression,
     #[serde(default)]
@@ -229,6 +237,12 @@ pub enum SurfaceNest {
     Floating,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceTooltip {
+    UsageSummary,
+}
+
 impl SurfaceNest {
     pub fn resolve(self, reference: ReferenceRegion) -> Self {
         match self {
@@ -320,6 +334,7 @@ impl SceneObject {
             background: LayerBackground::default(),
             border: None,
             mouse_events: None,
+            tooltip: None,
             corner_radius: 0.0.into(),
             layout: ChildLayout::Freeform,
             align: ChildAlignment::Start,
@@ -1068,6 +1083,8 @@ struct SceneObjectWire {
     #[serde(default)]
     mouse_events: Option<MouseEvents>,
     #[serde(default)]
+    tooltip: Option<SurfaceTooltip>,
+    #[serde(default)]
     corner_radius: Expression,
     #[serde(default)]
     layout: ChildLayout,
@@ -1151,6 +1168,7 @@ impl<'de> Deserialize<'de> for SceneObject {
             background: wire.background,
             border: wire.border,
             mouse_events: wire.mouse_events,
+            tooltip: wire.tooltip,
             corner_radius: wire.corner_radius,
             layout: wire.layout,
             align: wire.align,
@@ -1314,12 +1332,13 @@ pub struct RenderedTheme {
 pub struct DataContext {
     values: HashMap<String, f64>,
     strings: HashMap<String, String>,
+    force_segoe_ui: bool,
 }
 
 /// Runtime environment used by theme expressions and layout. Provider state is
 /// deliberately independent of polling availability so a temporary provider
 /// error never causes the widget to jump or resize.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThemeRuntime {
     providers: ProviderSet,
     pub poll_ok: bool,
@@ -1329,8 +1348,12 @@ pub struct ThemeRuntime {
     /// the `.display` values and summaries using them follow this; `.percentage`
     /// always means consumption so severity thresholds keep their meaning.
     pub countdown: bool,
+    pub use_windows_default_font: bool,
     pub surface_nest: SurfaceNest,
     pub floating_card_opacity: u8,
+    pub antigravity_gemini_enabled: bool,
+    pub antigravity_external_enabled: bool,
+    pub crossfade_opacity: f64,
     host_width: u32,
     host_height: u32,
 }
@@ -1343,8 +1366,12 @@ impl Default for ThemeRuntime {
             has_error: false,
             language: LanguageId::English,
             countdown: false,
+            use_windows_default_font: true,
             surface_nest: SurfaceNest::Taskbar,
             floating_card_opacity: 85,
+            antigravity_gemini_enabled: true,
+            antigravity_external_enabled: false,
+            crossfade_opacity: 1.0,
             host_width: default_canvas_width(),
             host_height: default_canvas_height(),
         }
@@ -1367,17 +1394,34 @@ impl ThemeRuntime {
     }
 
     pub fn from_providers(providers: ProviderSet) -> Self {
+        let agy = providers.contains(ProviderId::Antigravity);
         Self {
             providers,
             poll_ok: true,
             has_error: false,
             language: LanguageId::English,
             countdown: false,
+            use_windows_default_font: true,
             surface_nest: SurfaceNest::Taskbar,
             floating_card_opacity: 85,
+            antigravity_gemini_enabled: agy,
+            antigravity_external_enabled: false,
+            crossfade_opacity: 1.0,
             host_width: default_canvas_width(),
             host_height: default_canvas_height(),
         }
+    }
+
+    pub fn with_antigravity_pools(
+        mut self,
+        gemini: bool,
+        external: bool,
+        crossfade_opacity: f64,
+    ) -> Self {
+        self.antigravity_gemini_enabled = gemini;
+        self.antigravity_external_enabled = external;
+        self.crossfade_opacity = crossfade_opacity;
+        self
     }
 
     pub fn with_nest(mut self, nest: SurfaceNest) -> Self {
@@ -1404,6 +1448,11 @@ impl ThemeRuntime {
     /// Count each allowance down towards its limit instead of up from zero.
     pub fn with_countdown(mut self, countdown: bool) -> Self {
         self.countdown = countdown;
+        self
+    }
+
+    pub fn with_windows_default_font(mut self, enabled: bool) -> Self {
+        self.use_windows_default_font = enabled;
         self
     }
 
@@ -1438,7 +1487,10 @@ impl DataContext {
         canvas: &Canvas,
         runtime: ThemeRuntime,
     ) -> Self {
-        let mut context = Self::default();
+        let mut context = Self {
+            force_segoe_ui: !runtime.use_windows_default_font,
+            ..Self::default()
+        };
         context.insert("canvas.width", canvas.width as f64);
         context.insert("canvas.height", canvas.height as f64);
         context.insert("parent.width", canvas.width as f64);
@@ -1504,6 +1556,21 @@ impl DataContext {
             );
         }
         context.insert("display.countdown", runtime.countdown as u8 as f64);
+        context.insert(
+            "antigravity.gemini.enabled",
+            runtime.antigravity_gemini_enabled as u8 as f64,
+        );
+        context.insert(
+            "antigravity.external.enabled",
+            runtime.antigravity_external_enabled as u8 as f64,
+        );
+        let agy_dual_mode =
+            runtime.antigravity_gemini_enabled && runtime.antigravity_external_enabled;
+        context.insert("antigravity.dual_mode", agy_dual_mode as u8 as f64);
+        context.insert(
+            "antigravity.crossfade_opacity",
+            runtime.crossfade_opacity.clamp(0.0, 1.0),
+        );
         if let Some(data) = data {
             for account in &data.accounts {
                 let key = format!(
@@ -1546,6 +1613,22 @@ impl DataContext {
                     runtime.countdown,
                 );
             }
+            if let Some(agy) = data.get(ProviderId::Antigravity) {
+                // Antigravity answered this poll; pool-level gaps are "no limit
+                // data" ("--"), not a provider error.
+                context.insert("antigravity.reported", 1.0);
+                context.insert_provider("antigravity.gemini", Some(agy), false, runtime.countdown);
+                // A missing external pool stays empty ("--"); never show Gemini figures in its place.
+                context.insert_provider(
+                    "antigravity.external",
+                    agy.external_pool.as_deref(),
+                    false,
+                    runtime.countdown,
+                );
+            } else {
+                context.insert_provider("antigravity.gemini", None, false, runtime.countdown);
+                context.insert_provider("antigravity.external", None, false, runtime.countdown);
+            }
             let active = ProviderId::ALL
                 .into_iter()
                 .find_map(|provider| data.get(provider).map(|usage| (provider, usage)));
@@ -1564,6 +1647,8 @@ impl DataContext {
                     runtime.countdown,
                 );
             }
+            context.insert_provider("antigravity.gemini", None, false, runtime.countdown);
+            context.insert_provider("antigravity.external", None, false, runtime.countdown);
             context.insert_provider("active", None, false, runtime.countdown);
         }
         context
@@ -1593,6 +1678,12 @@ impl DataContext {
             .unwrap_or("7d")
             .to_string();
         self.insert_string(&format!("{name}.weekly.label"), weekly_label);
+        let session_label = usage
+            .and_then(|usage| usage.session_label.as_deref())
+            .or_else(|| self.get_string("i18n.session_window"))
+            .unwrap_or("5h")
+            .to_string();
+        self.insert_string(&format!("{name}.session.label"), session_label);
         let (five_hour, weekly) = usage
             .map(|usage| (usage.session.percentage, usage.weekly.percentage))
             .unwrap_or((0.0, 0.0));
@@ -1607,15 +1698,58 @@ impl DataContext {
         } else {
             five_hour
         };
+        let (session_available, weekly_available) = usage
+            .map(|usage| {
+                (
+                    usage.session.available || use_codex_session_fallback,
+                    usage.weekly.available,
+                )
+            })
+            .unwrap_or((false, false));
+        self.insert(
+            &format!("{name}.session.available"),
+            session_available as u8 as f64,
+        );
+        self.insert(
+            &format!("{name}.five_hour.available"),
+            usage.is_some_and(|usage| usage.session.available) as u8 as f64,
+        );
+        self.insert(
+            &format!("{name}.weekly.available"),
+            weekly_available as u8 as f64,
+        );
         self.insert(&format!("{name}.session.percentage"), session);
         self.insert(&format!("{name}.session.remaining"), 100.0 - session);
-        self.insert(&format!("{name}.session.display"), display(session));
+        // An Antigravity pool window that was not reported draws an empty
+        // gauge in either usage direction instead of a full "remaining" one.
+        let shown_session = if name.starts_with("antigravity") && !session_available {
+            0.0
+        } else {
+            display(session)
+        };
+        self.insert(&format!("{name}.session.display"), shown_session);
         self.insert(&format!("{name}.five_hour.percentage"), five_hour);
         self.insert(&format!("{name}.five_hour.remaining"), 100.0 - five_hour);
-        self.insert(&format!("{name}.five_hour.display"), display(five_hour));
+        // An Antigravity pool window that was not reported draws an empty
+        // gauge in either usage direction instead of a full "remaining" one.
+        let shown_five_hour = if name.starts_with("antigravity")
+            && !usage.is_some_and(|usage| usage.session.available)
+        {
+            0.0
+        } else {
+            display(five_hour)
+        };
+        self.insert(&format!("{name}.five_hour.display"), shown_five_hour);
         self.insert(&format!("{name}.weekly.percentage"), weekly);
         self.insert(&format!("{name}.weekly.remaining"), 100.0 - weekly);
-        self.insert(&format!("{name}.weekly.display"), display(weekly));
+        // An Antigravity pool window that was not reported draws an empty
+        // gauge in either usage direction instead of a full "remaining" one.
+        let shown_weekly = if name.starts_with("antigravity") && !weekly_available {
+            0.0
+        } else {
+            display(weekly)
+        };
+        self.insert(&format!("{name}.weekly.display"), shown_weekly);
         let monthly = usage.and_then(|usage| usage.monthly.as_ref());
         self.insert_string(&format!("{name}.monthly.label"), "30d");
         if let Some(monthly) = monthly {

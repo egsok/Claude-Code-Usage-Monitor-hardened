@@ -22,7 +22,7 @@ The scanners fetch current advisory data on each run. Fix a finding by updating
 or replacing the dependency where possible. Any necessary exception must be
 narrow and document the advisory, applicability, owner, and review date; do not
 disable a category of checks to make CI pass. License exceptions in `deny.toml`
-are limited to the existing bundled fonts and `option-ext`.
+are limited to the existing bundled fonts.
 
 ### Current advisory exception
 
@@ -47,9 +47,22 @@ Use the same scanner versions as `.github/workflows/dependency-security.yml`:
 ```powershell
 cargo install --locked cargo-audit --version 0.22.2
 cargo install --locked cargo-deny --version 0.20.2
-cargo audit --file Cargo.lock
-cargo deny --locked check
+./tests/Test-Dependencies.ps1
 ```
+
+Run `Test-Dependencies.ps1` before each local release build, alongside the existing
+Rust verification. It validates locked Cargo metadata, runs `cargo audit --file
+Cargo.lock`, then `cargo deny --locked check`, and stops on any failure. A failed
+check must be resolved before running `cargo build --release`. The script can be
+called from any working directory and restores that directory when it finishes.
+
+After a version or dependency change, first synchronize the lockfile with
+`cargo metadata --format-version 1 > $null` and review its diff. The checks themselves
+use the existing lockfile and do not update dependencies. Rerun them if manifests,
+the lockfile, vendored dependencies, or dependency policy change. Direct Cargo
+builds do not invoke this script automatically; it is a required release preparation
+step, also recorded in the local agent instructions. Release CI already enforces
+both scanner checks before its build job.
 
 Scanner versions are pinned in the workflow and must be updated there and in
 these commands together; Dependabot's Cargo updates cover application manifests,
@@ -66,3 +79,23 @@ Dependabot. When the egui/eframe family changes, follow
 upstream source, reapply the text-only clipboard changes, and verify the feature
 graph. Review upstream security fixes for this copy explicitly: registry
 advisories and source allowlists do not validate locally modified source code.
+
+## HTTPS trust verification
+
+Both polling and update agents explicitly select native TLS with
+`RootCerts::PlatformVerifier`, using the Windows certificate store. ureq 3.5.0
+includes the [connector feature fix](https://github.com/algesten/ureq/pull/1204)
+needed for `native-tls-no-default`; this avoids bundling `webpki-root-certs`.
+
+The regular Rust tests verify that both production agents send a TLS ClientHello
+without panicking, using a local TCP listener. After TLS dependency changes, also
+run the opt-in certificate checks:
+
+```powershell
+cargo test configured_https_transport_validates_certificates -- --ignored
+```
+
+These tests require direct Internet access to GitHub and BadSSL (bypassing proxy
+settings). Each agent must accept GitHub's valid certificate and reject self-signed,
+expired, and mismatched-host certificates with a native TLS error. DNS failures or
+timeouts fail the check rather than counting as successful certificate rejection.

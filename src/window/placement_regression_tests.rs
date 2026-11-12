@@ -1,6 +1,6 @@
 use super::*;
 
-fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> AppState {
+pub(super) fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> AppState {
     AppState {
         surface_hwnd: SendHwnd::from_hwnd(HWND::default()),
         monitors: Vec::new(),
@@ -18,6 +18,9 @@ fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> AppState {
         language_override: None,
         language: LanguageId::English,
         providers: ProviderSet::default(),
+        show_antigravity_gemini: true,
+        show_antigravity_external: true,
+        crossfade_opacity: 1.0,
         accounts: Default::default(),
         data: None,
         poll_interval_ms: POLL_15_MIN,
@@ -40,8 +43,10 @@ fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> AppState {
         drag_start_client_x: 0,
         auto_ejected: false,
         taskbar_auto_eject: true,
+        auto_ejected_for_capacity: false,
         auto_ejected_origin: None,
         auto_ejected_host: None,
+        lock_taskbar: false,
         is_switching_window_style: false,
         is_snapped: false,
         placement_override: Some(placement),
@@ -49,6 +54,7 @@ fn state_for(theme: ThemeDocument, placement: PlacementOverride) -> AppState {
         window_state_timer_active: false,
         custom_theme_enabled: true,
         usage_countdown: false,
+        use_windows_default_font: true,
         active_theme_path: None,
         active_theme: Some(theme),
         theme_clock_interval: None,
@@ -66,11 +72,246 @@ fn placement(nest: &str) -> PlacementOverride {
     PlacementOverride {
         nest: nest.into(),
         monitor_index: 0,
+        monitor_device: None,
         screen_x: 0,
         screen_y: 0,
         tray_offset: 0,
         floating_host: None,
     }
+}
+
+#[test]
+fn font_setting_reaches_widget_runtime() {
+    let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
+    assert!(theme_runtime_from_state(&state).use_windows_default_font);
+    state.use_windows_default_font = false;
+    assert!(!theme_runtime_from_state(&state).use_windows_default_font);
+}
+
+#[test]
+fn saved_monitor_device_overrides_an_invalid_index_for_both_hosts() {
+    let displays = native_interop::find_monitors();
+    for (index, display) in displays.iter().enumerate() {
+        let device = native_interop::monitor_device_name(display.handle)
+            .expect("enumerated monitor must have a device name");
+        for nest in ["taskbar", "floating"] {
+            let mut saved = placement(nest);
+            saved.monitor_index = usize::MAX;
+            saved.monitor_device = Some(device.clone());
+            saved.screen_x = display.rect.left;
+            saved.screen_y = display.rect.top;
+            let state = state_for(ThemeDocument::starter(), saved.clone());
+            let theme = theme_with_placement(&state, false).unwrap();
+            assert_eq!(theme.surfaces[0].placement.reference.display, index);
+            assert_eq!(state.placement_override, Some(saved));
+        }
+    }
+}
+
+#[test]
+fn absent_saved_monitor_preserves_the_choice_while_using_host_fallbacks() {
+    for nest in ["taskbar", "floating"] {
+        let mut saved = placement(nest);
+        saved.monitor_index = usize::MAX;
+        saved.monitor_device = Some("missing-monitor".into());
+        saved.screen_x = 400;
+        saved.screen_y = 300;
+        let state = state_for(ThemeDocument::starter(), saved.clone());
+        let fallback = theme_with_placement(&state, false).unwrap();
+        let mut legacy = saved.clone();
+        legacy.monitor_device = None;
+        let legacy_state = state_for(ThemeDocument::starter(), legacy);
+        let expected = theme_with_placement(&legacy_state, false).unwrap();
+        assert_eq!(
+            fallback.surfaces[0].placement,
+            expected.surfaces[0].placement
+        );
+        assert_eq!(state.placement_override, Some(saved));
+    }
+}
+
+#[test]
+fn theme_selection_releases_the_previous_roots_temporary_fallback() {
+    for nest in [
+        SurfaceNest::Desktop,
+        SurfaceNest::TrayIcon,
+        SurfaceNest::Floating,
+        SurfaceNest::Taskbar,
+    ] {
+        let mut state = ejected_state();
+        let mut next = ThemeDocument::starter();
+        next.id = "new-theme".into();
+        next.surfaces[0].placement.nest = nest;
+        next.surfaces[0].placement.offset_x = 400;
+        next.surfaces[0].placement.offset_y = 300;
+        next.prepare_runtime();
+        let authored = next.surfaces[0].placement.clone();
+        replace_active_theme(&mut state, next, Some("new-theme.json".into()));
+        assert!(!state.auto_ejected);
+        assert!(!state.auto_ejected_for_capacity);
+        assert!(state.auto_ejected_origin.is_none());
+        assert!(state.auto_ejected_host.is_none());
+        assert_eq!(
+            effective_theme_from_state(&state).unwrap().surfaces[0].placement,
+            authored
+        );
+    }
+}
+
+fn ejected_state() -> AppState {
+    let mut state = state_for(ThemeDocument::starter(), placement("taskbar"));
+    state.placement_override = None;
+    state.active_theme_path = Some("current.json".into());
+    state.auto_ejected = true;
+    state.auto_ejected_for_capacity = true;
+    state.auto_ejected_origin = Some(POINT { x: 100, y: 100 });
+    state.auto_ejected_host = Some(app_settings::FloatingHost {
+        theme_id: state.active_theme.as_ref().unwrap().id.clone(),
+        surface_id: "main".into(),
+        width: 62,
+        height: 1080,
+    });
+    state
+}
+
+#[test]
+fn same_theme_refresh_preserves_fallback_until_the_configured_root_changes() {
+    let mut state = ejected_state();
+    let current = state.active_theme.clone().unwrap();
+    replace_active_theme(&mut state, current.clone(), Some("current.json".into()));
+    update_configured_placement(&mut state, None, 0, 0);
+    assert!(state.auto_ejected && state.auto_ejected_for_capacity);
+    assert_eq!(state.auto_ejected_origin.unwrap().x, 100);
+    assert!(state.auto_ejected_host.is_some());
+    // Editing an existing file must take effect even with the same theme id.
+    let mut edited = current.clone();
+    edited.surfaces[0].placement.nest = SurfaceNest::Desktop;
+    replace_active_theme(&mut state, edited, Some("current.json".into()));
+    assert!(!state.auto_ejected);
+    let mut state = ejected_state();
+    let mut edited = current.clone();
+    edited.surfaces[0].placement.offset_y += 1;
+    replace_active_theme(&mut state, edited, None);
+    assert!(!state.auto_ejected);
+    let mut state = ejected_state();
+    replace_active_theme(&mut state, current, Some("duplicate-id.json".into()));
+    assert!(!state.auto_ejected);
+}
+
+#[test]
+fn explicit_placement_changes_take_precedence_over_temporary_fallback() {
+    for nest in ["taskbar", "floating"] {
+        let mut state = ejected_state();
+        let mut saved = placement(nest);
+        saved.screen_x = 400;
+        saved.screen_y = 300;
+        update_configured_placement(&mut state, Some(saved.clone()), 0, 0);
+        assert!(!state.auto_ejected);
+        assert_eq!(state.placement_override, Some(saved.clone()));
+        // Selecting another theme retains the user's explicit placement.
+        let mut next = ThemeDocument::starter();
+        next.id = "new-theme".into();
+        replace_active_theme(&mut state, next, None);
+        assert_eq!(state.placement_override, Some(saved));
+    }
+    for (index, offset) in [(1, 0), (0, 50)] {
+        let mut state = ejected_state();
+        update_configured_placement(&mut state, None, index, offset);
+        assert!(!state.auto_ejected);
+    }
+}
+
+#[test]
+fn taskbar_lock_restores_auto_ejection_without_discarding_dock_placement() {
+    let mut saved = placement("taskbar");
+    saved.screen_x = 640;
+    saved.tray_offset = 80;
+    let mut state = state_for(ThemeDocument::starter(), saved.clone());
+    state.auto_ejected = true;
+    state.auto_ejected_origin = Some(POINT { x: 640, y: 900 });
+    state.auto_ejected_host = Some(app_settings::FloatingHost {
+        theme_id: "classic".into(),
+        surface_id: "main".into(),
+        width: 1920,
+        height: 46,
+    });
+    assert!(!clear_locked_auto_ejection(&mut state));
+    assert!(state.auto_ejected);
+    assert!(state.auto_ejected_origin.is_some());
+    assert!(state.auto_ejected_host.is_some());
+
+    state.lock_taskbar = true;
+    assert!(clear_locked_auto_ejection(&mut state));
+    assert!(!state.auto_ejected);
+    assert!(state.auto_ejected_origin.is_none());
+    assert!(state.auto_ejected_host.is_none());
+    assert_eq!(state.placement_override, Some(saved));
+    assert!(!clear_locked_auto_ejection(&mut state));
+}
+
+#[test]
+fn taskbar_lock_follows_configured_host_during_drag_and_auto_ejection() {
+    for nest in [
+        SurfaceNest::Taskbar,
+        SurfaceNest::TrayIcon,
+        SurfaceNest::Desktop,
+        SurfaceNest::Floating,
+    ] {
+        let mut theme = ThemeDocument::starter();
+        theme.surfaces[0].placement.nest = nest;
+        let mut state = state_for(theme, placement("taskbar"));
+        state.placement_override = None;
+        for locked in [false, true] {
+            state.lock_taskbar = locked;
+            // A drag temporarily detaches the HWND; it must retain its host policy.
+            state.dragging = true;
+            state.embedded = false;
+            assert_eq!(
+                taskbar_lock_applies(&state),
+                locked && nest == SurfaceNest::Taskbar
+            );
+            state.dragging = false;
+            state.auto_ejected = true;
+            assert_eq!(
+                taskbar_lock_applies(&state),
+                locked && nest == SurfaceNest::Taskbar
+            );
+        }
+    }
+}
+
+#[test]
+fn taskbar_lock_respects_saved_host_overrides_and_legacy_auto_hosts() {
+    let mut theme = ThemeDocument::starter();
+    theme.surfaces[0].placement.nest = SurfaceNest::Floating;
+    let mut state = state_for(theme, placement("taskbar"));
+    state.lock_taskbar = true;
+    assert!(taskbar_lock_applies(&state));
+    state.active_theme.as_mut().unwrap().surfaces[0]
+        .placement
+        .nest = SurfaceNest::Taskbar;
+    state.placement_override = Some(placement("floating"));
+    assert!(!taskbar_lock_applies(&state));
+    state.placement_override = None;
+    let surface = &mut state.active_theme.as_mut().unwrap().surfaces[0];
+    surface.placement.nest = SurfaceNest::Auto;
+    surface.placement.reference.region = ReferenceRegion::SystemTray;
+    assert!(taskbar_lock_applies(&state));
+    state.active_theme.as_mut().unwrap().surfaces[0]
+        .placement
+        .reference
+        .region = ReferenceRegion::Monitor;
+    assert!(!taskbar_lock_applies(&state));
+}
+
+#[test]
+fn taskbar_lock_leaves_intentional_floating_placement_unchanged() {
+    let saved = placement("floating");
+    let mut state = state_for(ThemeDocument::starter(), saved.clone());
+    state.lock_taskbar = true;
+    assert!(!taskbar_lock_applies(&state));
+    assert!(!clear_locked_auto_ejection(&mut state));
+    assert_eq!(state.placement_override, Some(saved));
 }
 
 #[test]

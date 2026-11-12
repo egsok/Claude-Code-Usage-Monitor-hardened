@@ -3,7 +3,7 @@ use super::*;
 impl StudioApp {
     pub(super) fn studio_page(&mut self, ui: &mut egui::Ui) {
         let language = self.language();
-        let themes = available_themes(self.theme_path.as_deref(), &self.theme);
+        let themes = self.available_themes();
         let mut requested_theme = None;
         let read_only = self.theme_is_read_only();
         let can_delete = !read_only
@@ -22,7 +22,7 @@ impl StudioApp {
                     self.theme.name.clone()
                 })
                 .show_ui(ui, |ui| {
-                    for theme in &themes {
+                    for theme in themes.iter() {
                         let selected = self.theme_path.as_deref() == Some(theme.path.as_path());
                         if dropdown_selectable_label(ui, selected, &theme.label).clicked() {
                             requested_theme = Some(theme.path.clone());

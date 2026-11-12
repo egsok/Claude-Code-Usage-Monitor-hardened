@@ -11,13 +11,14 @@ use windows::Win32::System::Threading::{
     INFINITE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, MessageBoxW, PostMessageW, SetForegroundWindow, ShowWindowAsync, MB_ICONERROR,
-    MB_OK, SW_RESTORE, WM_CLOSE,
+    FindWindowW, GetClassNameW, GetWindowThreadProcessId, IsWindow, MessageBoxW, PostMessageW,
+    SetForegroundWindow, ShowWindowAsync, MB_ICONERROR, MB_OK, SW_RESTORE, WM_CLOSE,
 };
 
 pub(crate) const DASHBOARD_TITLE: &str = "Usage Monitor — Hardened v2 Experiment";
 const DASHBOARD_MUTEX: &str = "Local\\ClaudeCodeUsageMonitorHardenedUpstream2Dashboard";
 const DASHBOARD_REQUEST_EVENT: &str = "Local\\ClaudeCodeUsageMonitorHardenedUpstream2OpenDashboard";
+const DASHBOARD_WINDOW_CLASS: &str = "Window Class";
 
 /// Display-only snapshot shared with the dashboard process. The monitor keeps
 /// the authoritative release descriptor and chooses the installation channel.
@@ -57,25 +58,52 @@ pub(crate) fn publish_update_status(owner: HWND, status: UpdateStatus) {
     }
 }
 
-pub(crate) fn read_update_status(owner: isize) -> UpdateStatus {
-    let read = || -> Option<UpdateStatus> {
-        if owner == 0 {
+fn monitor_process_id(owner: isize) -> Option<u32> {
+    if owner == 0 {
+        return None;
+    }
+    let hwnd = HWND(owner as *mut _);
+    let mut class_name = [0u16; 64];
+    let mut process_id = 0;
+    unsafe {
+        if !IsWindow(Some(hwnd)).as_bool() {
             return None;
         }
-        let content = std::fs::read(update_status_path()).ok()?;
-        let snapshot: UpdateSnapshot = serde_json::from_slice(&content).ok()?;
-        let mut process_id = 0;
-        unsafe {
-            windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(
-                HWND(owner as *mut _),
-                Some(&mut process_id),
-            );
+        let length = GetClassNameW(hwnd, &mut class_name).max(0) as usize;
+        if String::from_utf16_lossy(&class_name[..length])
+            != "ClaudeCodeUsageMonitorHardenedUpstream2"
+        {
+            return None;
         }
-        // Ignore snapshots from a previous monitor or a disconnected dashboard.
-        (snapshot.owner == owner && process_id != 0 && snapshot.process_id == process_id)
-            .then_some(snapshot.status)
-    };
-    read().unwrap_or_default()
+        GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+    }
+    (process_id != 0).then_some(process_id)
+}
+
+fn read_live_update_snapshot() -> Option<UpdateSnapshot> {
+    let content = std::fs::read(update_status_path()).ok()?;
+    let snapshot: UpdateSnapshot = serde_json::from_slice(&content).ok()?;
+    // A saved HWND may have been destroyed or reused by a different process.
+    (monitor_process_id(snapshot.owner) == Some(snapshot.process_id)).then_some(snapshot)
+}
+
+/// Keep a live connection, or discover the monitor that replaced a dead owner.
+/// Owner zero denotes a standalone editor and must remain disconnected.
+pub(crate) fn resolve_monitor_owner(owner: isize) -> Option<isize> {
+    if owner == 0 {
+        return None;
+    }
+    if monitor_process_id(owner).is_some() {
+        return Some(owner);
+    }
+    read_live_update_snapshot().map(|snapshot| snapshot.owner)
+}
+
+pub(crate) fn read_update_status(owner: isize) -> UpdateStatus {
+    read_live_update_snapshot()
+        .filter(|snapshot| snapshot.owner == owner)
+        .map(|snapshot| snapshot.status)
+        .unwrap_or_default()
 }
 
 fn language() -> crate::localization::LanguageId {
@@ -220,12 +248,23 @@ pub fn report_launch_failure(owner: HWND, detail: &str) {
     }
 }
 
-pub fn focus_existing() -> bool {
-    let title = crate::native_interop::wide_str(DASHBOARD_TITLE);
+fn find_dashboard_window(title: &str) -> Option<HWND> {
+    let title = crate::native_interop::wide_str(title);
+    let class = crate::native_interop::wide_str(DASHBOARD_WINDOW_CLASS);
     unsafe {
-        let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR::from_raw(title.as_ptr())) else {
-            return false;
-        };
+        FindWindowW(
+            PCWSTR::from_raw(class.as_ptr()),
+            PCWSTR::from_raw(title.as_ptr()),
+        )
+        .ok()
+    }
+}
+
+pub fn focus_existing() -> bool {
+    let Some(hwnd) = find_dashboard_window(DASHBOARD_TITLE) else {
+        return false;
+    };
+    unsafe {
         // The dashboard runs on another UI thread/process. Do not block the
         // monitor (and its taskbar host) if that thread is busy or unresponsive.
         let _ = ShowWindowAsync(hwnd, SW_RESTORE);
@@ -235,17 +274,85 @@ pub fn focus_existing() -> bool {
 }
 
 pub fn close_existing() -> bool {
-    let title = crate::native_interop::wide_str(DASHBOARD_TITLE);
-    unsafe {
-        let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR::from_raw(title.as_ptr())) else {
-            return false;
-        };
-        PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)).is_ok()
-    }
+    let Some(hwnd) = find_dashboard_window(DASHBOARD_TITLE) else {
+        return false;
+    };
+    unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)).is_ok() }
 }
 
 pub fn toggle(owner: HWND) {
     if !close_existing() {
         show(owner);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::Foundation::ERROR_CLASS_ALREADY_EXISTS;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    struct TestWindow(HWND);
+
+    impl TestWindow {
+        fn new(class: &str, title: &str) -> Self {
+            unsafe extern "system" fn procedure(
+                hwnd: HWND,
+                message: u32,
+                wparam: WPARAM,
+                lparam: LPARAM,
+            ) -> windows::Win32::Foundation::LRESULT {
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            }
+            let class = crate::native_interop::wide_str(class);
+            let title = crate::native_interop::wide_str(title);
+            unsafe {
+                let instance = GetModuleHandleW(PCWSTR::null()).unwrap();
+                let registered = RegisterClassW(&WNDCLASSW {
+                    lpfnWndProc: Some(procedure),
+                    hInstance: instance.into(),
+                    lpszClassName: PCWSTR::from_raw(class.as_ptr()),
+                    ..Default::default()
+                });
+                assert!(registered != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS);
+                Self(
+                    CreateWindowExW(
+                        WINDOW_EX_STYLE::default(),
+                        PCWSTR::from_raw(class.as_ptr()),
+                        PCWSTR::from_raw(title.as_ptr()),
+                        WINDOW_STYLE::default(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        None,
+                        None,
+                        Some(instance.into()),
+                        None,
+                    )
+                    .unwrap(),
+                )
+            }
+        }
+    }
+
+    impl Drop for TestWindow {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = DestroyWindow(self.0);
+            }
+        }
+    }
+
+    #[test]
+    fn dashboard_lookup_excludes_the_controller_with_the_same_title() {
+        let title = format!("CCUM dashboard lookup regression {}", std::process::id());
+        let _controller = TestWindow::new("CCUMDashboardLookupControllerTest", &title);
+        assert!(find_dashboard_window(&title).is_none());
+        let dashboard = TestWindow::new(DASHBOARD_WINDOW_CLASS, &title);
+        assert_eq!(find_dashboard_window(&title), Some(dashboard.0));
+        drop(dashboard);
+        assert!(find_dashboard_window(&title).is_none());
     }
 }

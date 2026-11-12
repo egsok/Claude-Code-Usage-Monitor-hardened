@@ -64,7 +64,10 @@ pub enum ContextMenuAction {
     ToggleProvider {
         provider: ContextMenuProvider,
     },
+    ToggleAntigravityGemini,
+    ToggleAntigravityExternal,
     ToggleStartup,
+    ToggleTaskbarLock,
     ToggleWidget,
     /// Accepted only so menus saved by older versions can be loaded and
     /// cleaned up. New menus cannot create or execute this legacy action.
@@ -312,6 +315,7 @@ pub fn rendered_label(
         "OpenCode" => language.text("OpenCode"),
         "Cursor" => language.text("Cursor"),
         "Grok" => language.text("Grok"),
+        "Copilot" => language.text("Copilot"),
         "Open Dashboard" => language.text("Open Dashboard"),
         "Every minute" => language.text("Every minute"),
         "Every 5 minutes" => language.text("Every 5 minutes"),
@@ -319,6 +323,7 @@ pub fn rendered_label(
         "Every hour" => language.text("Every hour"),
         "Providers" => language.text("Providers"),
         "Check for updates" => language.text("Check for updates"),
+        "Lock in taskbar" => language.text("Lock in taskbar"),
         "Show widget" => language.text("Show widget"),
         _ => label,
     };
@@ -382,11 +387,14 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 },
             ),
             ContextMenuItem::action(
-                "provider-antigravity",
-                "Antigravity",
-                Action::ToggleProvider {
-                    provider: Provider::Antigravity,
-                },
+                "provider-antigravity-gemini",
+                "Antigravity (Gemini)",
+                Action::ToggleAntigravityGemini,
+            ),
+            ContextMenuItem::action(
+                "provider-antigravity-external",
+                "Antigravity (Claude + GPT)",
+                Action::ToggleAntigravityExternal,
             ),
             ContextMenuItem::action(
                 "provider-opencode",
@@ -407,6 +415,13 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 "Grok",
                 Action::ToggleProvider {
                     provider: Provider::Grok,
+                },
+            ),
+            ContextMenuItem::action(
+                "provider-copilot",
+                "Copilot",
+                Action::ToggleProvider {
+                    provider: Provider::Copilot,
                 },
             ),
         ],
@@ -441,6 +456,7 @@ pub fn classic_context_menu() -> ContextMenuDocument {
                 "Start with Windows",
                 Action::ToggleStartup,
             ),
+            ContextMenuItem::action("lock-taskbar", "Lock in taskbar", Action::ToggleTaskbarLock),
             ContextMenuItem::submenu("language", "Language", languages),
             ContextMenuItem::separator("settings-separator"),
             ContextMenuItem::action(
@@ -711,6 +727,9 @@ mod tests {
         assert!(serde_json::to_string(&menu)
             .unwrap()
             .contains("provider-grok"));
+        assert!(serde_json::to_string(&menu)
+            .unwrap()
+            .contains("provider-copilot"));
         assert!(menu.items.iter().any(|item| {
             item.id == "toggle-widget"
                 && matches!(

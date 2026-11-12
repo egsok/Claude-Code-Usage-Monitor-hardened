@@ -1,18 +1,13 @@
 # Claude Code Usage Monitor — Hardened v2 Experiment
 
-This branch experiments with upstream v2.15.14 plus the hardened fork's passive
-provider polling, resilient cached usage, Fable display and independently positioned
-monitor copies. It uses a separate application directory and profile; `main`
-remains on stable v1.7.0 while this branch is tried in daily use.
+This branch integrates upstream v2.23.6 with the hardened fork's passive
+polling, atomic settings and independent monitor copies. Candidate version:
+`2.23.6-hardened.1`. It is not installed or released; validation is in progress.
 
-**Release status:** `2.15.14-hardened.5` is a local release candidate awaiting desktop acceptance and CI.
-The `.4` tag exists, but its release was blocked by dependency checks; no v2 download is published yet.
-**Changes:** [release notes](.github/release-notes/v2.15.14-hardened.5.md) · [validation and history](docs/UPSTREAM-V2-EXPERIMENT.md).
-The current candidate is `2.15.14-hardened.5`, with opt-in Windows startup, a compact
-three-row Claude theme and a switch for automatic movement above the taskbar.
-The experiment never starts provider agent CLIs, refreshes OAuth tokens, or installs
-updates. Windows startup uses a separate v2 registration. There is no automatic
-portable updater and no WinGet package for this experimental channel.
+**Published experimental build:** [2.15.14-hardened.5](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.5).
+**Integration:** [decisions and validation](docs/UPSTREAM-V2.23-INTEGRATION.md).
+This candidate keeps the separate v2 profile/startup identity. It does not launch
+provider agents, refresh credentials, or download/replace its executable.
 
 Claude statistics use only `GET /api/oauth/usage`: no Messages API probes,
 including when reset fields are absent. Automatic cycles wait at least the selected
@@ -22,7 +17,7 @@ Manual refresh shares the in-flight guard and respects server `Retry-After`.
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A lightweight, open-source Windows taskbar widget for monitoring Claude Code usage limits and reset times. It can also display usage for Codex, Google Antigravity, OpenCode Go, Cursor, and Grok Build.
+A lightweight, open-source Windows taskbar widget for monitoring Claude Code usage limits and reset times. It can also display usage for Codex, Google Antigravity, OpenCode Go, Cursor, Grok Build, and GitHub Copilot.
 
 See the [user guide](USER_GUIDE.md) for theme customisation and everyday settings,
 or the [changelog](CHANGELOG.md) for version history and notable changes.
@@ -33,7 +28,7 @@ or the [changelog](CHANGELOG.md) for version history and notable changes.
 
 - Displays current usage and time remaining until each limit resets
 - Counts usage up from zero or down from the full allowance, whichever you prefer
-- Supports Claude Code, Codex, Google Antigravity, OpenCode Go, Cursor, and Grok Build
+- Supports Claude Code, Codex, Google Antigravity, OpenCode Go, Cursor, Grok Build, and GitHub Copilot
 - Supports multiple accounts for Claude Code and Codex
 - Lives in the Windows taskbar with quick controls in the system tray
 - Supports multiple monitors and Windows startup
@@ -50,9 +45,8 @@ Claude Code credentials can be detected from the CLI, Claude desktop app, or WSL
 
 ## Installation
 
-After publication, download `claude-code-usage-monitor.exe` and `SHA256SUMS.txt`
-from the [fork releases](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases).
-Until then, these are installation instructions for the upcoming v2 package.
+Download the published `.5` EXE and checksum from the release linked above.
+The `2.23.6-hardened.1` integration candidate is not yet a release.
 Compare `Get-FileHash .\claude-code-usage-monitor.exe -Algorithm SHA256` with the checksum file.
 
 For a new v2 installation, use a stable location such as:
@@ -105,6 +99,7 @@ In the default theme, left-click a provider tray icon to show or hide the widget
 | OpenCode Go | Connect an OpenCode Go account, configure the credentials described below, then enable OpenCode in **Providers**. |
 | Cursor | Sign in to Cursor, then enable it in **Providers**. The local session is detected automatically. |
 | Grok Build | Run `grok login` in the Grok Build CLI, then enable Grok in **Providers**. The signed-in session is detected automatically. |
+| GitHub Copilot | Sign in with the Copilot CLI (`copilot`, then `/login`) or the GitHub CLI (`gh auth login`), then enable Copilot in **Providers**. The stored login is detected automatically. |
 
 For OpenCode Go, set `OPENCODE_GO_WORKSPACE_ID` and `OPENCODE_GO_AUTH_COOKIE`, or create `%APPDATA%\opencode-go\config.json`:
 
@@ -120,6 +115,8 @@ The workspace ID is part of the OpenCode Go console URL: `https://opencode.ai/co
 For Cursor, `CURSOR_SESSION_TOKEN` can override the automatically detected local session.
 
 Grok Build usage comes from the session the CLI stores in `%USERPROFILE%\.grok\auth.json`, read through the same billing endpoint as the CLI's own `/usage` panel. Set `GROK_HOME` if the CLI keeps its home directory elsewhere. Only xAI sign-in entries are used; corporate identity-provider tokens and stored API keys are excluded. A bare `XAI_API_KEY` is not enough: the shared weekly allowance is only readable with a signed-in session. Grok reports one pool per billing period rather than a five-hour window, so the monitor shows it on the long-window row alongside the other providers, leaving the short-window row empty. On-demand spending replaces the pool on that row once any is used, as it already does for Claude Code and Codex.
+
+GitHub Copilot usage comes from `api.github.com/copilot_internal/user`, the endpoint Copilot's own editors and CLI read. The monitor uses the first GitHub login that endpoint accepts, in this order: the `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` environment variable, the Copilot CLI login, then the GitHub CLI login, both read from Windows Credential Manager. Copilot spends one premium-request pool per calendar month, so the monitor shows it on the long-window row and leaves the short-window row empty. Metered chat and completion allowances, as on Copilot Free, are available to themes through `copilot.limits.chat` and `copilot.limits.completions`.
 
 ## Data and privacy
 

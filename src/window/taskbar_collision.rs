@@ -293,7 +293,17 @@ impl Reader {
     }
 }
 
-fn taskbar_shown(bounds: RECT) -> bool {
+pub(super) fn taskbar_shown(bounds: RECT) -> bool {
+    let monitors: Vec<_> = native_interop::find_monitors()
+        .iter()
+        .map(|monitor| monitor.rect)
+        .collect();
+    taskbar_fully_shown(bounds, &monitors)
+}
+
+/// Windows 10 slides a full-thickness bar off-screen; Windows 11 collapses it
+/// to a reveal strip. Neither hidden geometry can establish layout capacity.
+pub(super) fn taskbar_fully_shown(bounds: RECT, monitors: &[RECT]) -> bool {
     let horizontal = native_interop::is_taskbar_horizontal(bounds);
     let thickness = if horizontal {
         bounds.bottom - bounds.top
@@ -301,8 +311,8 @@ fn taskbar_shown(bounds: RECT) -> bool {
         bounds.right - bounds.left
     };
     thickness > 2
-        && native_interop::find_monitors().iter().any(|monitor| {
-            intersection(bounds, monitor.rect).is_some_and(|visible| {
+        && monitors.iter().any(|&monitor| {
+            intersection(bounds, monitor).is_some_and(|visible| {
                 let shown = if horizontal {
                     visible.bottom - visible.top
                 } else {

@@ -1,7 +1,98 @@
 use super::*;
+
+#[test]
+fn font_setting_reaches_preview_runtime() {
+    let mut app = app_with_surfaces(vec![root("main")]);
+    assert!(app.theme_runtime().use_windows_default_font);
+    app.settings.use_windows_default_font = false;
+    assert!(!app.theme_runtime().use_windows_default_font);
+}
 use crate::ui::components::helper::{
     show_helper, Caret, HelperInsertion, HelperState, HelperStatus, HelperView, InsertMode,
 };
+
+#[test]
+fn dashboard_does_not_retry_after_successful_opengl_run() {
+    let mut attempts = Vec::new();
+    run_dashboard_with_fallback(|renderer, _gl_error| {
+        attempts.push(renderer);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(attempts, [DashboardRenderer::OpenGl]);
+}
+
+#[test]
+fn dashboard_retries_opengl_painter_and_configuration_failures() {
+    for error in [
+        eframe::Error::OpenGL("OpenGL 2.0 unavailable".to_owned().into()),
+        eframe::Error::NoGlutinConfigs(Default::default(), "No GL configuration".into()),
+    ] {
+        let mut error = Some(error);
+        let mut attempts = Vec::new();
+        run_dashboard_with_fallback(|renderer, _gl_error| {
+            attempts.push(renderer);
+            error.take().map_or(Ok(()), Err)
+        })
+        .unwrap();
+        assert_eq!(
+            attempts,
+            [DashboardRenderer::OpenGl, DashboardRenderer::Warp]
+        );
+    }
+}
+
+#[test]
+fn dashboard_does_not_retry_application_errors() {
+    let mut attempts = Vec::new();
+    let error = run_dashboard_with_fallback(|renderer, _gl_error| {
+        attempts.push(renderer);
+        Err(eframe::Error::AppCreation("Application failed".into()))
+    })
+    .unwrap_err();
+    assert_eq!(attempts, [DashboardRenderer::OpenGl]);
+    assert!(error.contains("Application failed"));
+}
+
+#[test]
+fn dashboard_reports_both_failures_without_retrying_again() {
+    let mut attempts = Vec::new();
+    let error = run_dashboard_with_fallback(|renderer, _gl_error| {
+        attempts.push(renderer);
+        match renderer {
+            DashboardRenderer::OpenGl => Err(eframe::Error::OpenGL(
+                "OpenGL unavailable".to_owned().into(),
+            )),
+            DashboardRenderer::Warp => Err(eframe::Error::AppCreation("Fallback failed".into())),
+        }
+    })
+    .unwrap_err();
+    assert_eq!(
+        attempts,
+        [DashboardRenderer::OpenGl, DashboardRenderer::Warp]
+    );
+    assert!(error.contains("OpenGL:"));
+    assert!(error.contains("OpenGL unavailable"));
+    assert!(error.contains("WARP:"));
+    assert!(error.contains("Fallback failed"));
+}
+
+#[test]
+fn warp_launch_receives_the_original_opengl_error() {
+    run_dashboard_with_fallback(|renderer, original_error| match renderer {
+        DashboardRenderer::OpenGl => {
+            assert!(original_error.is_none());
+            Err(eframe::Error::OpenGL(
+                "missing OpenGL driver".to_owned().into(),
+            ))
+        }
+        DashboardRenderer::Warp => {
+            assert!(original_error.unwrap().contains("missing OpenGL driver"));
+            Ok(())
+        }
+    })
+    .unwrap();
+}
 
 fn run_test_ui(context: &egui::Context, input: egui::RawInput, run_ui: impl FnMut(&mut egui::Ui)) {
     let mut output = context.run_ui(input, run_ui);
@@ -228,7 +319,7 @@ fn context_menu_preview_submenu_opens_on_hover() {
             },
         );
     });
-    let unrelated_popup_id = egui::Id::new("unrelated-dropdown-popup");
+    let unrelated_popup_id = egui::Id::unique("unrelated-dropdown-popup");
     egui::Popup::open_id(&context, unrelated_popup_id);
     collapse_context_menu_preview_on_outside_click(
         &context,
@@ -353,12 +444,19 @@ fn app_with_surfaces(surfaces: Vec<SceneObject>) -> StudioApp {
         update_status: crate::dashboard::UpdateStatus::Idle,
         diagnostics: studio_diagnostics::DiagnosticsView::new(),
         page: Page::Studio,
-        settings: SettingsFile::default(),
+        // Pin English so UI text assertions do not follow the system language.
+        settings: {
+            let mut settings = SettingsFile::default();
+            settings.language = Some("en-US".into());
+            settings
+        },
         synced_poll_interval_ms: SettingsFile::default().poll_interval_ms,
+        synced_taskbar_lock: false,
         poll_interval_editor_generation: 0,
         startup_enabled: false,
         theme,
         theme_path: None,
+        available_themes: AvailableThemesCache::new(theme_engine::themes_directory()),
         selection: Selection::Surface(0),
         preview: None,
         preview_dirty: true,
@@ -403,6 +501,238 @@ fn app_with_surfaces(surfaces: Vec<SceneObject>) -> StudioApp {
         context_menu_selection: None,
         delete_context_menu_confirmation: None,
     }
+}
+
+mod monitor_reconnection {
+    use super::*;
+    use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    struct MonitorWindow(HWND);
+
+    impl MonitorWindow {
+        fn new() -> Self {
+            static REGISTERED: std::sync::Once = std::sync::Once::new();
+            unsafe extern "system" fn procedure(
+                hwnd: HWND,
+                message: u32,
+                wparam: WPARAM,
+                lparam: LPARAM,
+            ) -> LRESULT {
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            }
+            let class = native_interop::wide_str("ClaudeCodeUsageMonitorHardenedUpstream2");
+            unsafe {
+                let module = GetModuleHandleW(PCWSTR::null()).unwrap();
+                REGISTERED.call_once(|| {
+                    let window_class = WNDCLASSW {
+                        lpfnWndProc: Some(procedure),
+                        hInstance: module.into(),
+                        lpszClassName: PCWSTR::from_raw(class.as_ptr()),
+                        ..Default::default()
+                    };
+                    assert_ne!(RegisterClassW(&window_class), 0);
+                });
+                Self(
+                    CreateWindowExW(
+                        WINDOW_EX_STYLE::default(),
+                        PCWSTR::from_raw(class.as_ptr()),
+                        PCWSTR::null(),
+                        WINDOW_STYLE::default(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        Some(HWND_MESSAGE),
+                        None,
+                        Some(module.into()),
+                        None,
+                    )
+                    .unwrap(),
+                )
+            }
+        }
+
+        fn owner(&self) -> isize {
+            self.0 .0 as isize
+        }
+
+        fn assert_message(&self, message: u32) {
+            let mut received = MSG::default();
+            assert!(unsafe {
+                PeekMessageW(&mut received, Some(self.0), message, message, PM_REMOVE).as_bool()
+            });
+            assert_eq!(received.hwnd, self.0);
+            assert_eq!(received.message, message);
+        }
+    }
+
+    impl Drop for MonitorWindow {
+        fn drop(&mut self) {
+            unsafe { DestroyWindow(self.0).unwrap() };
+        }
+    }
+
+    #[test]
+    fn dashboard_reconnects_after_monitor_replacement_and_preserves_edits() {
+        let original = MonitorWindow::new();
+        let mut app = app_with_surfaces(vec![root("root")]);
+        app.owner = original.owner();
+        app.dirty = true;
+        app.theme.name = "Unsaved theme".into();
+        app.undo_stack.push(app.theme.clone());
+        app.context_menu_dirty = true;
+        app.settings.poll_interval_ms = POLL_5_MIN;
+        drop(original);
+
+        let replacement = MonitorWindow::new();
+        crate::dashboard::publish_update_status(
+            replacement.0,
+            crate::dashboard::UpdateStatus::Available("3.0.0".into()),
+        );
+        app.last_cache_read = Instant::now() - Duration::from_secs(2);
+        app.refresh_usage_cache();
+
+        assert_eq!(app.owner, replacement.owner());
+        assert_eq!(
+            app.update_status,
+            crate::dashboard::UpdateStatus::Available("3.0.0".into())
+        );
+        assert!(app.dirty);
+        assert_eq!(app.theme.name, "Unsaved theme");
+        assert_eq!(app.undo_stack.len(), 1);
+        assert!(app.context_menu_dirty);
+        assert_eq!(app.settings.poll_interval_ms, POLL_5_MIN);
+        app.request_refresh();
+        assert!(app.settings_error.is_none());
+        replacement.assert_message(WM_APP_REFRESH_NOW);
+    }
+
+    #[test]
+    fn dashboard_commands_reconnect_before_periodic_refresh() {
+        let original = MonitorWindow::new();
+        let mut app = app_with_surfaces(vec![root("root")]);
+        app.owner = original.owner();
+        drop(original);
+        let replacement = MonitorWindow::new();
+        crate::dashboard::publish_update_status(
+            replacement.0,
+            crate::dashboard::UpdateStatus::Idle,
+        );
+
+        app.request_refresh();
+        assert!(app.settings_error.is_none());
+        replacement.assert_message(WM_APP_REFRESH_NOW);
+        app.save_settings(&app.settings.clone());
+        assert!(app.settings_error.is_none());
+        replacement.assert_message(WM_APP_SETTINGS_UPDATED);
+        for message in [
+            native_interop::WM_APP_ENABLE_DIAGNOSTICS,
+            native_interop::WM_APP_DISABLE_DIAGNOSTICS,
+        ] {
+            studio_diagnostics::send_owner_message(app.owner, message).unwrap();
+            replacement.assert_message(message);
+        }
+        app.request_update_action();
+        assert!(app.theme_error.is_none());
+        assert_eq!(app.update_status, crate::dashboard::UpdateStatus::Checking);
+        replacement.assert_message(native_interop::WM_APP_CHECK_FOR_UPDATES);
+    }
+
+    #[test]
+    fn dashboard_rejects_stale_or_unrelated_monitor_snapshots() {
+        let original = MonitorWindow::new();
+        let dead_owner = original.owner();
+        drop(original);
+        let replacement = MonitorWindow::new();
+        let snapshot_path = app_settings::app_data_directory().join("update-status.json");
+        app_settings::write_json_atomic(
+            &snapshot_path,
+            &serde_json::json!({
+                "owner": replacement.owner(),
+                "process_id": 0,
+                "status": {"Available": "3.0.0"}
+            }),
+        )
+        .unwrap();
+        assert_eq!(crate::dashboard::resolve_monitor_owner(dead_owner), None);
+        assert_eq!(
+            crate::dashboard::read_update_status(replacement.owner()),
+            crate::dashboard::UpdateStatus::Idle
+        );
+
+        let unrelated_class = native_interop::wide_str("STATIC");
+        let unrelated = MonitorWindow(unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                PCWSTR::from_raw(unrelated_class.as_ptr()),
+                PCWSTR::null(),
+                WINDOW_STYLE::default(),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+        });
+        crate::dashboard::publish_update_status(
+            unrelated.0,
+            crate::dashboard::UpdateStatus::Available("3.0.0".into()),
+        );
+        assert_eq!(crate::dashboard::resolve_monitor_owner(dead_owner), None);
+        assert_eq!(
+            crate::dashboard::read_update_status(unrelated.owner()),
+            crate::dashboard::UpdateStatus::Idle
+        );
+
+        crate::dashboard::publish_update_status(
+            replacement.0,
+            crate::dashboard::UpdateStatus::Idle,
+        );
+        drop(replacement);
+        assert_eq!(crate::dashboard::resolve_monitor_owner(dead_owner), None);
+        std::fs::write(snapshot_path, b"incomplete JSON").unwrap();
+        assert_eq!(crate::dashboard::resolve_monitor_owner(dead_owner), None);
+    }
+
+    #[test]
+    fn dashboard_keeps_live_owner_and_standalone_editor_disconnected() {
+        let original = MonitorWindow::new();
+        let other = MonitorWindow::new();
+        crate::dashboard::publish_update_status(other.0, crate::dashboard::UpdateStatus::Idle);
+        assert_eq!(
+            crate::dashboard::resolve_monitor_owner(original.owner()),
+            Some(original.owner())
+        );
+        assert_eq!(crate::dashboard::resolve_monitor_owner(0), None);
+    }
+}
+
+#[test]
+fn available_themes_keeps_current_external_theme_fresh_without_stale_fallbacks() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = app_with_surfaces(vec![root("root")]);
+    app.available_themes = AvailableThemesCache::new(directory.path().join("library"));
+    let first_path = directory.path().join("first.json");
+    app.theme_path = Some(first_path.clone());
+    app.theme.name = "First".into();
+    let themes = app.available_themes();
+    assert_eq!(themes.len(), 1);
+    assert_eq!(themes[0].path, first_path);
+    app.theme.name = "Renamed".into();
+    assert_eq!(app.available_themes()[0].name, "Renamed");
+    let second_path = directory.path().join("second.json");
+    app.theme_path = Some(second_path.clone());
+    let themes = app.available_themes();
+    assert_eq!(themes.len(), 1);
+    assert_eq!(themes[0].path, second_path);
+    app.theme_path = None;
+    assert!(app.available_themes().is_empty());
 }
 
 #[test]
@@ -765,6 +1095,7 @@ fn context_menu_action_scripts_round_trip_every_action_kind() {
             provider: ContextMenuProvider::Codex,
         },
         ContextMenuAction::ToggleStartup,
+        ContextMenuAction::ToggleTaskbarLock,
         ContextMenuAction::ToggleWidget,
         ContextMenuAction::SetLanguage {
             language: "en-US".into(),
@@ -1592,4 +1923,40 @@ fn scene_preview_stretches_the_entire_layer_background() {
         scene_preview_gradient_color(bounds.right_center(), bounds, start, end, 0.0),
         end
     );
+}
+
+#[test]
+fn menu_taskbar_lock_survives_unrelated_dashboard_edits() {
+    let mut app = app_with_surfaces(vec![root("main")]);
+    let mut persisted = SettingsFile::default();
+    persisted.lock_taskbar = true;
+    app_settings::update_settings(|current| *current = persisted.clone()).unwrap();
+    // Simulate a menu toggle while the dashboard still holds its startup snapshot.
+    assert!(!app.settings.lock_taskbar);
+    let previous = app.settings.clone();
+    app.settings.usage_countdown = true;
+    app.save_settings(&previous);
+    assert!(app.settings.lock_taskbar);
+    let saved = app_settings::load_settings();
+    assert!(saved.lock_taskbar && saved.usage_countdown);
+    persisted.lock_taskbar = false;
+    app_settings::update_settings(|current| *current = persisted.clone()).unwrap();
+    app.sync_taskbar_lock(false);
+    assert!(!app.settings.lock_taskbar);
+}
+
+#[test]
+fn local_taskbar_lock_edits_survive_sync_before_save() {
+    let mut app = app_with_surfaces(vec![root("main")]);
+    for saved in [false, true] {
+        app.settings.lock_taskbar = saved;
+        app.synced_taskbar_lock = saved;
+        app.settings.lock_taskbar = !saved;
+        app.sync_taskbar_lock(saved);
+        assert_eq!(app.settings.lock_taskbar, !saved);
+        // A subsequent menu toggle becomes authoritative after saving.
+        app.synced_taskbar_lock = app.settings.lock_taskbar;
+        app.sync_taskbar_lock(saved);
+        assert_eq!(app.settings.lock_taskbar, saved);
+    }
 }

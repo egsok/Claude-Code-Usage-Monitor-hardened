@@ -196,7 +196,8 @@ fn decode_package<R: Read + Seek>(reader: R) -> Result<DecodedPackage, String> {
         if entry.is_dir() {
             continue;
         }
-        let name = safe_entry_name(&entry.name().map_err(|error| error.to_string())?)?;
+        let name = entry.name().map_err(|error| error.to_string())?;
+        let name = safe_entry_name(&name)?;
         if !names.insert(name.clone()) {
             return Err(format!("Theme package contains duplicate entry '{name}'"));
         }
@@ -371,6 +372,27 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
+
+    #[test]
+    fn exported_package_round_trips_with_deflate() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("theme.zip");
+        let theme = ThemeDocument::starter();
+        let menu = context_menu::classic_context_menu();
+
+        assert_eq!(export_package(&path, &theme, &menu).unwrap(), 0);
+        let mut archive = ZipArchive::new(File::open(&path).unwrap()).unwrap();
+        assert_eq!(
+            archive.by_name(THEME_ENTRY).unwrap().compression(),
+            CompressionMethod::Deflated
+        );
+        let decoded = decode_package(File::open(&path).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&decoded.theme).unwrap(),
+            serde_json::to_value(&theme).unwrap()
+        );
+        assert_eq!(decoded.context_menu.unwrap(), menu);
+    }
 
     #[test]
     fn package_decoder_accepts_theme_menu_and_assets() {

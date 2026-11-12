@@ -68,18 +68,27 @@ pub struct SettingsFile {
     show_codex: bool,
     #[serde(default)]
     show_antigravity: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_antigravity_gemini: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_antigravity_external: Option<bool>,
     #[serde(default)]
     show_opencode: bool,
     #[serde(default)]
     show_cursor: bool,
     #[serde(default)]
     show_grok: bool,
+    #[serde(default)]
+    show_copilot: bool,
     #[serde(default = "default_true")]
     pub custom_theme_enabled: bool,
     /// Show what is left of each allowance instead of what has been spent, so
     /// the widget counts down towards a limit rather than up from zero.
     #[serde(default)]
     pub usage_countdown: bool,
+    /// Preserve theme fonts and Windows substitution unless explicitly disabled.
+    #[serde(default = "default_true")]
+    pub use_windows_default_font: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_theme_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,6 +97,10 @@ pub struct SettingsFile {
     pub dashboard_height: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floating_card_opacity: Option<u8>,
+    /// Prevent auto-ejection and outside drops for widgets configured with a
+    /// taskbar host. Intentional floating, desktop and tray hosts are unaffected.
+    #[serde(default)]
+    pub lock_taskbar: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement_override: Option<PlacementOverride>,
 }
@@ -97,6 +110,10 @@ pub struct PlacementOverride {
     pub nest: String,
     #[serde(default)]
     pub monitor_index: usize,
+    /// GDI device name (e.g. `\\.\DISPLAY2`) of the saved monitor. Enumeration
+    /// order can change between boots, so this wins over `monitor_index`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor_device: Option<String>,
     #[serde(default)]
     pub screen_x: i32,
     #[serde(default)]
@@ -136,15 +153,20 @@ impl Default for SettingsFile {
             show_claude_code: true,
             show_codex: false,
             show_antigravity: false,
+            show_antigravity_gemini: None,
+            show_antigravity_external: None,
             show_opencode: false,
             show_cursor: false,
             show_grok: false,
+            show_copilot: false,
             custom_theme_enabled: true,
             usage_countdown: false,
+            use_windows_default_font: true,
             active_theme_path: None,
             dashboard_width: None,
             dashboard_height: None,
             floating_card_opacity: None,
+            lock_taskbar: false,
             placement_override: None,
         }
     }
@@ -165,6 +187,14 @@ impl SettingsFile {
         {
             self.poll_interval_ms = default_poll_interval();
         }
+        if self.show_antigravity_gemini.is_none() {
+            self.show_antigravity_gemini = Some(self.show_antigravity);
+        }
+        if self.show_antigravity_external.is_none() {
+            self.show_antigravity_external = Some(self.show_antigravity);
+        }
+        self.show_antigravity = self.show_antigravity_gemini.unwrap_or(false)
+            || self.show_antigravity_external.unwrap_or(false);
         if self.enabled_providers().is_empty() {
             self.set_enabled_providers(ProviderSet::default());
         }
@@ -217,21 +247,65 @@ impl SettingsFile {
         match provider {
             ProviderId::Claude => self.show_claude_code,
             ProviderId::Codex => self.show_codex,
-            ProviderId::Antigravity => self.show_antigravity,
+            ProviderId::Antigravity => {
+                self.show_antigravity_gemini
+                    .unwrap_or(self.show_antigravity)
+                    || self
+                        .show_antigravity_external
+                        .unwrap_or(self.show_antigravity)
+            }
             ProviderId::OpenCode => self.show_opencode,
             ProviderId::Cursor => self.show_cursor,
             ProviderId::Grok => self.show_grok,
+            ProviderId::Copilot => self.show_copilot,
         }
+    }
+
+    pub fn antigravity_gemini_enabled(&self) -> bool {
+        self.show_antigravity_gemini
+            .unwrap_or(self.show_antigravity)
+    }
+
+    pub fn antigravity_external_enabled(&self) -> bool {
+        self.show_antigravity_external
+            .unwrap_or(self.show_antigravity)
+    }
+
+    #[allow(dead_code)]
+    pub fn set_antigravity_gemini_enabled(&mut self, enabled: bool) {
+        let external = self.antigravity_external_enabled();
+        self.show_antigravity_gemini = Some(enabled);
+        self.show_antigravity_external = Some(external);
+        self.show_antigravity = enabled || external;
+    }
+
+    #[allow(dead_code)]
+    pub fn set_antigravity_external_enabled(&mut self, enabled: bool) {
+        let gemini = self.antigravity_gemini_enabled();
+        self.show_antigravity_external = Some(enabled);
+        self.show_antigravity_gemini = Some(gemini);
+        self.show_antigravity = gemini || enabled;
     }
 
     pub fn set_provider_enabled(&mut self, provider: ProviderId, enabled: bool) {
         match provider {
             ProviderId::Claude => self.show_claude_code = enabled,
             ProviderId::Codex => self.show_codex = enabled,
-            ProviderId::Antigravity => self.show_antigravity = enabled,
+            ProviderId::Antigravity => {
+                // Re-saving an already enabled Antigravity keeps the user's
+                // per-pool choice; only an off/on transition resets both pools.
+                let was_enabled =
+                    self.antigravity_gemini_enabled() || self.antigravity_external_enabled();
+                if enabled != was_enabled {
+                    self.show_antigravity_gemini = Some(enabled);
+                    self.show_antigravity_external = Some(enabled);
+                }
+                self.show_antigravity = enabled;
+            }
             ProviderId::OpenCode => self.show_opencode = enabled,
             ProviderId::Cursor => self.show_cursor = enabled,
             ProviderId::Grok => self.show_grok = enabled,
+            ProviderId::Copilot => self.show_copilot = enabled,
         }
     }
 
@@ -551,6 +625,7 @@ fn initial_floating_placement() -> PlacementOverride {
     PlacementOverride {
         nest: "floating".into(),
         monitor_index: 0,
+        monitor_device: None,
         screen_x: 100,
         screen_y: 100,
         tray_offset: 0,
@@ -573,6 +648,36 @@ fn now_unix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_default_font_is_on_for_existing_settings_and_persists_when_disabled() {
+        assert!(SettingsFile::default().use_windows_default_font);
+        assert!(decode_settings("{}").unwrap().use_windows_default_font);
+        for enabled in [false, true] {
+            let settings = SettingsFile {
+                use_windows_default_font: enabled,
+                ..Default::default()
+            };
+            let saved = settings_json(&settings).to_string();
+            assert_eq!(
+                decode_settings(&saved).unwrap().use_windows_default_font,
+                enabled
+            );
+        }
+    }
+
+    #[test]
+    fn taskbar_lock_is_opt_in_and_survives_settings_round_trip() {
+        assert!(!decode_settings("{}").unwrap().lock_taskbar);
+        for lock_taskbar in [false, true] {
+            let settings = SettingsFile {
+                lock_taskbar,
+                ..Default::default()
+            };
+            let decoded = decode_settings(&settings_json(&settings).to_string()).unwrap();
+            assert_eq!(decoded.lock_taskbar, lock_taskbar);
+        }
+    }
 
     #[test]
     fn settings_transaction_subprocess() {
@@ -782,6 +887,7 @@ mod tests {
             ProviderId::OpenCode,
             ProviderId::Cursor,
             ProviderId::Grok,
+            ProviderId::Copilot,
         ]));
 
         let json = settings_json(&settings);
@@ -791,6 +897,7 @@ mod tests {
         assert_eq!(json["show_opencode"], true);
         assert_eq!(json["show_cursor"], true);
         assert_eq!(json["show_grok"], true);
+        assert_eq!(json["show_copilot"], true);
 
         let decoded = decode_settings(&json.to_string()).unwrap();
         assert_eq!(decoded.enabled_providers(), settings.enabled_providers());
@@ -916,5 +1023,59 @@ mod tests {
         invalid.normalize();
         assert_eq!(invalid.dashboard_width, None);
         assert_eq!(invalid.dashboard_height, None);
+    }
+
+    #[test]
+    fn resaving_enabled_providers_keeps_antigravity_pool_choice() {
+        let mut settings = SettingsFile::default();
+        settings.set_provider_enabled(ProviderId::Antigravity, true);
+        settings.set_antigravity_gemini_enabled(false);
+        settings.set_enabled_providers(ProviderSet::from_enabled([
+            ProviderId::Claude,
+            ProviderId::Antigravity,
+        ]));
+        assert!(!settings.antigravity_gemini_enabled());
+        assert!(settings.antigravity_external_enabled());
+
+        settings.set_provider_enabled(ProviderId::Antigravity, false);
+        assert!(!settings.antigravity_gemini_enabled());
+        assert!(!settings.antigravity_external_enabled());
+        settings.set_provider_enabled(ProviderId::Antigravity, true);
+        assert!(settings.antigravity_gemini_enabled() && settings.antigravity_external_enabled());
+    }
+    #[test]
+    fn enabling_one_antigravity_pool_does_not_enable_the_other_on_migration() {
+        for gemini in [true, false] {
+            let mut settings = SettingsFile::default();
+            if gemini {
+                settings.set_antigravity_gemini_enabled(true);
+            } else {
+                settings.set_antigravity_external_enabled(true);
+            }
+            settings.normalize();
+            assert!(settings.provider_enabled(ProviderId::Antigravity));
+            assert_eq!(settings.antigravity_gemini_enabled(), gemini);
+            assert_eq!(settings.antigravity_external_enabled(), !gemini);
+        }
+    }
+
+    #[test]
+    fn antigravity_legacy_settings_migrate_and_disabled_pools_stay_disabled() {
+        for enabled in [true, false] {
+            let mut settings: SettingsFile = serde_json::from_value(serde_json::json!({
+                "show_antigravity": enabled
+            }))
+            .unwrap();
+            settings.normalize();
+            assert_eq!(settings.antigravity_gemini_enabled(), enabled);
+            assert_eq!(settings.antigravity_external_enabled(), enabled);
+            settings.set_provider_enabled(ProviderId::Antigravity, false);
+            let mut reloaded: SettingsFile =
+                serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            reloaded.normalize();
+            assert!(!reloaded.provider_enabled(ProviderId::Antigravity));
+            assert!(!reloaded.antigravity_gemini_enabled());
+            assert!(!reloaded.antigravity_external_enabled());
+        }
     }
 }

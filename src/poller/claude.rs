@@ -111,7 +111,8 @@ pub(super) fn poll_account(path: &Path) -> Result<UsageData, PollError> {
 fn desktop_credentials_for_default_path(path: &Path) -> Option<Credentials> {
     let credentials = desktop_fallback_paths(path)
         .iter()
-        .find_map(|path| read_desktop_app_credentials(path))?;
+        .filter_map(|path| read_desktop_app_credentials(path))
+        .find(|credentials| !is_token_expired(credentials.expires_at))?;
     diagnose::log("default profile fell back to the Claude desktop app token cache");
     Some(credentials)
 }
@@ -287,7 +288,21 @@ pub(super) fn credential_watch_snapshot(all_sources: bool) -> Vec<String> {
 }
 
 fn usable_credentials(credentials: Credentials) -> Result<Credentials, PollError> {
+    usable_credentials_with(credentials, desktop_credentials_for_default_path)
+}
+
+fn usable_credentials_with(
+    credentials: Credentials,
+    desktop: impl FnOnce(&Path) -> Option<Credentials>,
+) -> Result<Credentials, PollError> {
     if is_token_expired(credentials.expires_at) {
+        // The desktop app owns and refreshes its cache. Only the default CLI
+        // source may borrow that existing login; custom accounts stay pinned.
+        if let CredentialSource::Windows(path) = &credentials.source {
+            if let Some(desktop) = desktop(path) {
+                return Ok(desktop);
+            }
+        }
         return Err(PollError::TokenExpired);
     }
     Ok(credentials)
@@ -413,7 +428,9 @@ fn windows_credential_source() -> Option<CredentialSource> {
             .map(|directory| CredentialSource::Windows(directory.join(".credentials.json")));
     }
     Some(CredentialSource::Windows(
-        dirs::home_dir()?.join(".claude").join(".credentials.json"),
+        crate::known_folders::home_dir()?
+            .join(".claude")
+            .join(".credentials.json"),
     ))
 }
 
@@ -902,6 +919,91 @@ mod tests {
         );
     }
 
+    #[test]
+    fn weekly_and_fable_only_usage_preserves_the_absent_session() {
+        for session in ["", "\"five_hour\":null,"] {
+            let json = format!(
+                r#"{{{session}"seven_day":{{"utilization":26}},"limits":[{{"kind":"weekly_scoped","percent":43,"scope":{{"model":{{"display_name":"Fable"}}}}}}]}}"#
+            );
+            let mut body = ureq::Body::builder().data(json.into_bytes());
+            let data = parse_usage_body(&mut body).unwrap();
+            let cached: UsageData =
+                serde_json::from_str(&serde_json::to_string(&data).unwrap()).unwrap();
+            assert_eq!(cached, data);
+            assert!(!data.session.available);
+            assert!(data.session.resets_at.is_none());
+            assert!(data.weekly.available);
+            assert_eq!(data.weekly.percentage, 26.0);
+            assert_eq!(data.limits[0].model.as_deref(), Some("Fable"));
+            assert_eq!(data.limits[0].usage.percentage, 43.0);
+        }
+    }
+    #[test]
+    fn expired_windows_token_can_use_existing_desktop_cache_without_refresh() {
+        let path = PathBuf::from("fixture/.credentials.json");
+        let credentials = usable_credentials_with(
+            Credentials {
+                access_token: "expired".into(),
+                expires_at: Some(0),
+                source: CredentialSource::Windows(path.clone()),
+            },
+            |selected| {
+                assert_eq!(selected, path);
+                Some(Credentials {
+                    access_token: "existing-desktop".into(),
+                    expires_at: Some(i64::MAX),
+                    source: CredentialSource::DesktopApp(PathBuf::from("fixture/config.json")),
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(credentials.access_token, "existing-desktop");
+        assert!(matches!(
+            credentials.source,
+            CredentialSource::DesktopApp(_)
+        ));
+    }
+
+    #[test]
+    fn fresh_and_non_windows_sources_do_not_borrow_desktop_credentials() {
+        for (source, expiry) in [
+            (
+                CredentialSource::Windows(PathBuf::from("fixture/.credentials.json")),
+                i64::MAX,
+            ),
+            (
+                CredentialSource::DesktopApp(PathBuf::from("fixture/config.json")),
+                0,
+            ),
+            (
+                CredentialSource::Wsl {
+                    distro: "fixture".into(),
+                },
+                0,
+            ),
+        ] {
+            let outcome = usable_credentials_with(
+                Credentials {
+                    access_token: "existing".into(),
+                    expires_at: Some(expiry),
+                    source,
+                },
+                |_| panic!("this source must remain pinned"),
+            );
+            assert_eq!(outcome.is_ok(), expiry == i64::MAX);
+        }
+        assert!(matches!(
+            usable_credentials_with(
+                Credentials {
+                    access_token: "expired".into(),
+                    expires_at: Some(0),
+                    source: CredentialSource::Windows(PathBuf::from("fixture/.credentials.json")),
+                },
+                |_| None,
+            ),
+            Err(PollError::TokenExpired)
+        ));
+    }
     fn usage_from_json(json: &str) -> UsageData {
         let response: UsageResponse =
             serde_json::from_str(json).expect("the fixture should deserialize");

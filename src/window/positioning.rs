@@ -72,20 +72,12 @@ pub(super) fn position_at_taskbar() {
         }
     };
 
-    let taskbar_height = taskbar_rect.bottom - taskbar_rect.top;
-    let mut tray_left = taskbar_rect.right;
-    let anchor_top = taskbar_rect.top;
-    let anchor_height = taskbar_height;
-
-    if let Some(tray_hwnd) = native_interop::find_child_window(taskbar_hwnd, "TrayNotifyWnd") {
-        if let Some(tray_rect) = native_interop::get_window_rect_safe(tray_hwnd) {
-            tray_left = tray_rect.left;
-        }
-    }
-
+    let tray = native_interop::find_child_window(taskbar_hwnd, "TrayNotifyWnd")
+        .and_then(native_interop::get_window_rect_safe);
     let widget_width = total_widget_width();
-    let max_offset = (tray_left - taskbar_rect.left - widget_width).max(0);
-    let tray_offset = tray_offset.clamp(0, max_offset);
+    let widget_height = total_widget_height();
+    let (rect, tray_offset) =
+        legacy_taskbar_rect(taskbar_rect, tray, widget_width, widget_height, tray_offset);
     let offset_changed = {
         let mut state = lock_state();
         if let Some(s) = state.as_mut() {
@@ -103,24 +95,56 @@ pub(super) fn position_at_taskbar() {
         save_state_settings();
     }
 
-    let widget_height = total_widget_height();
-    let y = compute_anchor_y(anchor_top, anchor_height, widget_height);
+    let (mut x, mut y) = (rect.left, rect.top);
     if embedded {
         // Child window: coordinates relative to parent (taskbar)
-        let x = tray_left - taskbar_rect.left - widget_width - tray_offset;
-        native_interop::move_window(hwnd, x, y - taskbar_rect.top, widget_width, widget_height);
-        diagnose::log(format!(
-            "positioned embedded widget at x={x} y={} w={widget_width} h={widget_height}",
-            y - taskbar_rect.top
-        ));
-    } else {
-        // Topmost popup: screen coordinates
-        let x = tray_left - widget_width - tray_offset;
-        native_interop::move_window(hwnd, x, y, widget_width, widget_height);
-        diagnose::log(format!(
-            "positioned fallback widget at x={x} y={y} w={widget_width} h={widget_height}"
-        ));
+        let mut point = [POINT { x, y }];
+        unsafe { MapWindowPoints(None, Some(taskbar_hwnd), &mut point) };
+        x = point[0].x;
+        y = point[0].y;
     }
+    native_interop::move_window(hwnd, x, y, widget_width, widget_height);
+    diagnose::log(format!(
+        "positioned widget embedded={embedded} at x={x} y={y} w={widget_width} h={widget_height}"
+    ));
+}
+
+/// Screen coordinates for both child and popup legacy widgets. The tray sits
+/// at the trailing end of the taskbar's long axis, including on secondary bars
+/// without a notification area.
+pub(super) fn legacy_taskbar_rect(
+    taskbar: RECT,
+    tray: Option<RECT>,
+    width: i32,
+    height: i32,
+    offset: i32,
+) -> (RECT, i32) {
+    let horizontal = native_interop::is_taskbar_horizontal(taskbar);
+    let reference = system_tray_reference(taskbar, tray);
+    let max_offset = if horizontal {
+        reference.left - taskbar.left - width
+    } else {
+        reference.top - taskbar.top - height
+    }
+    .max(0);
+    let offset = offset.clamp(0, max_offset);
+    let (x, y) = if horizontal {
+        (
+            reference.left - width - offset,
+            compute_anchor_y(taskbar.top, taskbar.bottom - taskbar.top, height),
+        )
+    } else {
+        (taskbar.left, reference.top - height - offset)
+    };
+    (
+        RECT {
+            left: x,
+            top: y,
+            right: x + width,
+            bottom: y + height,
+        },
+        offset,
+    )
 }
 
 pub(super) fn ensure_layered_window(hwnd: HWND) {
@@ -229,31 +253,51 @@ pub(super) fn render_custom_window(
     }
 }
 
-pub(super) fn position_custom_theme(hwnd: HWND, theme: &ThemeDocument, scale: f64) {
-    position_custom_theme_internal(hwnd, theme, scale);
+pub(super) fn position_custom_theme(hwnd: HWND, theme: &ThemeDocument, scale: f64) -> bool {
+    position_custom_theme_internal(hwnd, theme, scale)
 }
 
-pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, scale: f64) {
+pub(super) fn position_custom_theme_internal(
+    hwnd: HWND,
+    theme: &ThemeDocument,
+    scale: f64,
+) -> bool {
     let is_dragging = {
         let state = lock_state();
         state.as_ref().is_some_and(|s| s.dragging)
     };
     if is_dragging {
-        return;
+        return true;
     }
     let taskbars = native_interop::find_taskbars();
     let displays = native_interop::find_monitors();
     let display_index = theme.placement.reference.display;
+    let is_primary_surface = lock_state().as_ref().is_some_and(|state| {
+        state.surface_hwnd.to_hwnd() == hwnd
+            || state
+                .desktop_hwnds
+                .first()
+                .and_then(|window| *window)
+                .map(SendHwnd::to_hwnd)
+                == Some(hwnd)
+    });
+    if !is_primary_surface && display_index >= displays.len() {
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+        return false;
+    }
     let selected_display = displays
         .get(display_index)
         .copied()
         .or_else(|| displays.first().copied());
     let Some(display) = selected_display else {
-        return;
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+        return false;
     };
-    let taskbar = taskbars.iter().find(|taskbar| unsafe {
-        MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) == display.handle
-    });
+    let taskbar = native_interop::taskbar_for_monitor(&taskbars, &displays, display.handle);
     let width = scaled_theme_dimension(theme.canvas.width.max(1), scale);
     let height = scaled_theme_dimension(theme.canvas.height.max(1), scale);
     let tray = taskbar
@@ -278,7 +322,7 @@ pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, 
             SurfaceNest::Taskbar => {
                 let Some(taskbar) = taskbar else {
                     let _ = ShowWindow(hwnd, SW_HIDE);
-                    return;
+                    return false;
                 };
                 native_interop::embed_as_child(hwnd, taskbar.hwnd);
                 ensure_tray_event_hook_for_taskbar(hwnd, taskbar.hwnd);
@@ -311,13 +355,13 @@ pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, 
                         SWP_NOACTIVATE,
                     );
                 } else {
-                    native_interop::make_popup(hwnd, false);
-                    let _ =
-                        SetWindowPos(hwnd, Some(HWND_BOTTOM), x, y, width, height, SWP_NOACTIVATE);
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                    return false;
                 }
             }
             SurfaceNest::TrayIcon => {
                 let _ = ShowWindow(hwnd, SW_HIDE);
+                return false;
             }
             SurfaceNest::Floating | SurfaceNest::Auto => {
                 native_interop::make_popup(hwnd, true);
@@ -333,6 +377,7 @@ pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, 
             }
         }
     }
+    true
 }
 
 pub(super) fn sync_theme_window_visibility() {
@@ -356,6 +401,7 @@ pub(super) fn sync_theme_window_visibility() {
                 .collect::<Vec<_>>(),
         )
     };
+    let display_count = native_interop::find_monitors().len();
     unsafe {
         for (surface_index, surface) in theme.surfaces.iter().enumerate() {
             let nest = surface
@@ -373,13 +419,16 @@ pub(super) fn sync_theme_window_visibility() {
                 continue;
             }
             let surface_runtime = theme_runtime_for_surface(&theme, surface_index, runtime);
-            let should_show =
-                theme_engine::surface_should_render(
+            let has_display =
+                surface_index == 0 || surface.placement.reference.display < display_count;
+            let should_show = has_display
+                && theme_engine::surface_should_render(
                     &theme,
                     surface_index,
                     data.as_ref(),
                     surface_runtime,
-                ) && !foreground_is_fullscreen_on_display(surface.placement.reference.display);
+                )
+                && !foreground_is_fullscreen_on_display(surface.placement.reference.display);
             if should_show == IsWindowVisible(hwnd).as_bool() {
                 continue;
             }
@@ -468,8 +517,13 @@ pub(super) fn foreground_is_fullscreen_on_display(display_index: usize) -> bool 
         {
             return false;
         }
-        rect_covers_monitor(rect, display.rect)
+        window_is_fullscreen(rect, display.rect, IsZoomed(foreground).as_bool())
     }
+}
+
+pub(super) fn window_is_fullscreen(rect: RECT, monitor: RECT, maximized: bool) -> bool {
+    // Maximized windows also cover the monitor when the taskbar auto-hides.
+    !maximized && rect_covers_monitor(rect, monitor)
 }
 
 pub(super) fn rect_covers_monitor(rect: RECT, monitor: RECT) -> bool {
@@ -669,7 +723,7 @@ pub(super) fn schedule_tray_reposition(hwnd: HWND) {
     // geometry before updating the position, avoiding transient jumps and jitter.
     const TRAY_REPOSITION_TRAILING_DELAY_MS: u32 = 80;
     unsafe {
-        let _ = SetTimer(
+        let _ = set_controller_timer(
             Some(hwnd),
             TIMER_TRAY_REPOSITION,
             TRAY_REPOSITION_TRAILING_DELAY_MS,
@@ -741,6 +795,34 @@ pub(super) fn monitor_index_for_handle(
     handle: HMONITOR,
 ) -> Option<usize> {
     displays.iter().position(|display| display.handle == handle)
+}
+
+/// Resolve a saved monitor: the device name wins, then the saved index. A
+/// named monitor that is absent (e.g. not enumerated yet during boot) yields
+/// None so callers fall back without the index silently picking another one.
+pub(super) fn resolve_saved_monitor(
+    displays: &[native_interop::DisplayMonitor],
+    index: usize,
+    device: Option<&str>,
+) -> Option<usize> {
+    let names: Vec<Option<String>> = displays
+        .iter()
+        .map(|display| native_interop::monitor_device_name(display.handle))
+        .collect();
+    resolve_saved_monitor_in(&names, index, device)
+}
+
+fn resolve_saved_monitor_in(
+    names: &[Option<String>],
+    index: usize,
+    device: Option<&str>,
+) -> Option<usize> {
+    match device {
+        Some(device) => names
+            .iter()
+            .position(|name| name.as_deref() == Some(device)),
+        None => (index < names.len()).then_some(index),
+    }
 }
 
 pub(super) fn override_primary_placement(
@@ -1022,6 +1104,44 @@ pub(super) fn is_taskbar_capacity_sufficient(
     }
 }
 
+/// Auto-hide temporarily exposes only a reveal strip. Do not mistake that
+/// shell geometry for an incompatible theme or a reason to leave the bar.
+pub(super) fn taskbar_surface_is_clipped(taskbar: RECT, widget: RECT) -> bool {
+    if (taskbar.right - taskbar.left).min(taskbar.bottom - taskbar.top) <= 2 {
+        return false;
+    }
+    widget.left < taskbar.left
+        || widget.top < taskbar.top
+        || widget.right > taskbar.right
+        || widget.bottom > taskbar.bottom
+}
+
+pub(super) fn taskbar_ejection_required(
+    taskbar: RECT,
+    widget: RECT,
+    overlaps_apps: bool,
+    locked: bool,
+) -> bool {
+    if locked {
+        // Windows 10's 40px bar slightly clips the built-in 46px layouts.
+        // Honor the lock while at least half the widget remains visible, but
+        // retain the visibility fallback for mostly hidden layouts.
+        return taskbar_surface_is_clipped(taskbar, widget)
+            && calculate_rect_overlap_ratio(widget, taskbar) < 0.5;
+    }
+    taskbar_surface_is_clipped(taskbar, widget) || overlaps_apps
+}
+
+pub(super) fn taskbar_reposition_required(
+    taskbar: RECT,
+    widget: RECT,
+    target: RECT,
+    locked: bool,
+) -> bool {
+    taskbar_ejection_required(taskbar, widget, false, locked)
+        && !taskbar_ejection_required(taskbar, target, false, locked)
+}
+
 /// Choose a measured gap near the drag, including gaps left of centred apps.
 pub(super) fn taskbar_free_dock_slot(
     taskbar_hwnd: HWND,
@@ -1055,4 +1175,39 @@ pub(super) fn taskbar_free_dock_slot(
             calculate_rect_overlap_ratio(widget, *a)
                 .total_cmp(&calculate_rect_overlap_ratio(widget, *b))
         })
+}
+
+#[cfg(test)]
+mod resolve_saved_monitor_tests {
+    use super::resolve_saved_monitor_in;
+
+    fn names(list: &[&str]) -> Vec<Option<String>> {
+        list.iter().map(|name| Some((*name).to_string())).collect()
+    }
+
+    #[test]
+    fn device_name_follows_the_monitor_when_enumeration_order_changes() {
+        // Saved on DISPLAY2 at index 1; a third monitor now sorts before it.
+        let displays = names(&[r"\\.\DISPLAY1", r"\\.\DISPLAY3", r"\\.\DISPLAY2"]);
+        assert_eq!(
+            resolve_saved_monitor_in(&displays, 1, Some(r"\\.\DISPLAY2")),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn absent_named_monitor_does_not_fall_back_to_the_stale_index() {
+        let displays = names(&[r"\\.\DISPLAY1", r"\\.\DISPLAY3"]);
+        assert_eq!(
+            resolve_saved_monitor_in(&displays, 1, Some(r"\\.\DISPLAY2")),
+            None
+        );
+    }
+
+    #[test]
+    fn placements_saved_without_a_device_keep_using_the_index() {
+        let displays = names(&[r"\\.\DISPLAY1", r"\\.\DISPLAY2"]);
+        assert_eq!(resolve_saved_monitor_in(&displays, 1, None), Some(1));
+        assert_eq!(resolve_saved_monitor_in(&displays, 5, None), None);
+    }
 }

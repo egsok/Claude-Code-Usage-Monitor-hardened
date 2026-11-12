@@ -112,7 +112,14 @@ impl DataContext {
             let (owner, field) = name.split_once('.')?;
             if !matches!(
                 owner,
-                "claude" | "codex" | "antigravity" | "opencode" | "cursor" | "grok" | "active"
+                "claude"
+                    | "codex"
+                    | "antigravity"
+                    | "opencode"
+                    | "cursor"
+                    | "grok"
+                    | "copilot"
+                    | "active"
             ) {
                 return None;
             }
@@ -320,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn fable_only_expands_classic_main_surface_and_never_changes_headlines() {
+    fn fable_expands_horizontal_main_surfaces_without_changing_tray_or_headlines() {
         let plain_usage = UsageData {
             session: UsageSection {
                 available: true,
@@ -352,10 +359,15 @@ mod tests {
                         render_theme_surface_with_runtime(&theme, index, Some(&plain), runtime);
                     let after =
                         render_theme_surface_with_runtime(&theme, index, Some(&extra), runtime);
-                    if theme.id == CLASSIC_THEME_ID && index == 0 {
+                    let extra_width = match theme.id.as_str() {
+                        CLASSIC_THEME_ID => Some(114),
+                        COMPACT_FLUENT_QUAD_THEME_ID => Some(96),
+                        _ => None,
+                    };
+                    if let Some(extra_width) = extra_width.filter(|_| index == 0) {
                         assert_eq!(
                             (after.width, after.height),
-                            (before.width + 114, before.height)
+                            (before.width + extra_width, before.height)
                         );
                         assert!(after.warnings.is_empty());
                         continue;
@@ -374,6 +386,30 @@ mod tests {
         assert_eq!(context.get("claude.headline.percentage"), Some(29.0));
     }
 
+    #[test]
+    fn unknown_scoped_model_keeps_its_binding_without_claiming_fable_layout() {
+        let mut quota = limit();
+        quota.key = "weekly_scoped_future".into();
+        quota.label = "Future".into();
+        quota.model = Some("Future".into());
+        let usage = AppUsageData::from_iter([(
+            ProviderId::Claude,
+            UsageData {
+                limits: vec![quota],
+                ..Default::default()
+            },
+        )]);
+        let context = DataContext::from_usage(Some(&usage), &Canvas::default());
+        assert_eq!(context.get("claude.scoped.available"), Some(1.0));
+        assert_eq!(context.get("claude.model.future.available"), Some(1.0));
+        assert_eq!(context.get("claude.model.fable.available"), Some(0.0));
+        let theme = ThemeDocument::starter();
+        let runtime = ThemeRuntime::new(true, false, false);
+        assert_eq!(
+            resolve_surface_size(&theme, 0, Some(&usage), runtime),
+            resolve_surface_size(&theme, 0, None, runtime),
+        );
+    }
     #[test]
     fn additional_resets_and_stale_quota_caches_follow_existing_poll_rules() {
         let mut limit = limit();

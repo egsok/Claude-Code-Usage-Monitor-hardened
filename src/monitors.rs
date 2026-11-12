@@ -228,6 +228,7 @@ mod tests {
             taskbar: Some(TaskbarWindow {
                 hwnd: HWND::default(),
                 rect: RECT::default(),
+                primary,
             }),
         }
     }

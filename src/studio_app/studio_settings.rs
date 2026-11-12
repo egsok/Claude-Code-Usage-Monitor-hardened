@@ -8,7 +8,7 @@ impl StudioApp {
         let mut changed = false;
         let mut requested_theme = None;
         let mut open_theme_studio = false;
-        let themes = available_themes(self.theme_path.as_deref(), &self.theme);
+        let themes = self.available_themes();
         if let Some(error) = &self.settings_error {
             ui.colored_label(egui::Color32::from_rgb(196, 64, 64), error);
             ui.add_space(8.0);
@@ -129,6 +129,18 @@ impl StudioApp {
                 setting_separator(ui);
                 setting_row(
                     ui,
+                    language.text("Lock in taskbar"),
+                    language.text("Keep the widget docked; never float automatically"),
+                    |ui| {
+                        changed |= Toggle::new(&mut self.settings.lock_taskbar)
+                            .labels(language.text("Locked"), language.text("Floating"))
+                            .show(ui)
+                            .changed();
+                    },
+                );
+                setting_separator(ui);
+                setting_row(
+                    ui,
                     language.text("Language"),
                     language.text("Language used by the app and widget"),
                     |ui| {
@@ -156,6 +168,18 @@ impl StudioApp {
             section(ui, language.text("Appearance"), |ui| {
                 setting_row(
                     ui,
+                    language.text("Use Windows default font"),
+                    language.text("Turn off to use Segoe UI for widget text"),
+                    |ui| {
+                        changed |= Toggle::new(&mut self.settings.use_windows_default_font)
+                            .labels(language.text("Enabled"), language.text("Disabled"))
+                            .show(ui)
+                            .changed();
+                    },
+                );
+                setting_separator(ui);
+                setting_row(
+                    ui,
                     language.text("Active theme"),
                     language.text("The widget is managed in Theme Studio"),
                     |ui| {
@@ -163,7 +187,7 @@ impl StudioApp {
                             .width(220.0)
                             .selected_text(&self.theme.name)
                             .show_ui(ui, |ui| {
-                                for theme in &themes {
+                                for theme in themes.iter() {
                                     let selected =
                                         self.theme_path.as_deref() == Some(theme.path.as_path());
                                     if dropdown_selectable_label(ui, selected, &theme.label)

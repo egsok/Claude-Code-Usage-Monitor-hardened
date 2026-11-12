@@ -845,6 +845,250 @@ fn built_in_classic_reserves_readable_countdown_geometry() {
 }
 
 #[test]
+fn classic_hover_summary_survives_theme_round_trips_and_is_opt_in() {
+    let theme = ThemeDocument::starter();
+    assert_eq!(
+        theme.surfaces[0].tooltip,
+        Some(SurfaceTooltip::UsageSummary)
+    );
+    let json = serde_json::to_string(&theme).unwrap();
+    let reloaded: ThemeDocument = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        reloaded.surfaces[0].tooltip,
+        Some(SurfaceTooltip::UsageSummary)
+    );
+    let legacy: SceneObject = serde_json::from_str(r#"{"id":"old","name":"Old theme"}"#).unwrap();
+    assert_eq!(legacy.tooltip, None);
+    assert!(!serde_json::to_string(&legacy).unwrap().contains("tooltip"));
+    assert!(theme
+        .surfaces
+        .iter()
+        .skip(1)
+        .all(|surface| surface.tooltip.is_none()));
+}
+
+#[test]
+fn built_in_themes_hide_absent_claude_sessions_and_keep_weekly_and_fable_limits() {
+    use crate::models::{UsageData, UsageLimit, UsageSection};
+
+    for (_, source) in BUILTIN_THEME_SOURCES {
+        let theme: ThemeDocument = serde_json::from_str(source).unwrap();
+        for session_available in [false, true] {
+            let usage = AppUsageData::from_iter([(
+                ProviderId::Claude,
+                UsageData {
+                    session: UsageSection {
+                        available: session_available,
+                        // An idle session is still a real quota when reported.
+                        percentage: 0.0,
+                        resets_at: None,
+                    },
+                    weekly: UsageSection {
+                        available: true,
+                        percentage: 26.0,
+                        resets_at: None,
+                    },
+                    limits: vec![UsageLimit {
+                        key: "weekly_scoped_fable".into(),
+                        kind: "weekly_scoped".into(),
+                        label: "Fable".into(),
+                        model: Some("Fable".into()),
+                        is_active: true,
+                        usage: UsageSection {
+                            available: true,
+                            percentage: 43.0,
+                            resets_at: None,
+                        },
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            )]);
+            for countdown in [false, true] {
+                let runtime = ThemeRuntime::new(true, false, false).with_countdown(countdown);
+                let (width, height) = resolve_surface_size(&theme, 0, Some(&usage), runtime);
+                let canvas = Canvas {
+                    width,
+                    height,
+                    ..Default::default()
+                };
+                let mut context =
+                    DataContext::from_usage_with_runtime(Some(&usage), &canvas, runtime);
+                for dark in [false, true] {
+                    context.insert("system.dark", dark as u8 as f64);
+                    let mut session_layers = 0;
+                    let mut weekly_layers = 0;
+                    let mut fable_layers = 0;
+                    for object in &theme.surfaces[0].children {
+                        let visible = evaluate(&object.render.0, &context).unwrap() != 0.0;
+                        if object.id.starts_with("claude-session-") {
+                            if !session_available {
+                                assert!(!visible, "{}: {}", theme.id, object.id);
+                            }
+                            session_layers += visible as usize;
+                        } else if object.id.starts_with("claude-weekly-") {
+                            weekly_layers += visible as usize;
+                        } else if object.id.starts_with("fable-weekly-")
+                            || object.id.starts_with("claude-fable-")
+                        {
+                            fable_layers += visible as usize;
+                        }
+                    }
+                    assert_eq!(session_layers, if session_available { 2 } else { 0 });
+                    assert_eq!(weekly_layers, 2);
+                    if theme.id != CLASSIC_VERTICAL_THEME_ID {
+                        assert_eq!(fable_layers, 2);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn built_in_classic_adds_a_fable_column_when_the_limit_is_available() {
+    use crate::models::{UsageData, UsageLimit, UsageSection};
+
+    let usage = AppUsageData::from_iter([(
+        ProviderId::Claude,
+        UsageData {
+            limits: vec![UsageLimit {
+                stale: false,
+                key: "weekly_scoped_fable".into(),
+                kind: "weekly_scoped".into(),
+                label: "Fable".into(),
+                model: Some("Fable".into()),
+                model_id: None,
+                scope: None,
+                is_active: true,
+                usage: UsageSection {
+                    available: true,
+                    percentage: 43.0,
+                    resets_at: None,
+                },
+            }],
+            ..Default::default()
+        },
+    )]);
+    let theme = ThemeDocument::starter();
+
+    assert_eq!(
+        resolve_surface_size(
+            &theme,
+            0,
+            Some(&usage),
+            ThemeRuntime::new(true, false, false)
+        ),
+        (351, 46)
+    );
+    assert!(theme.surfaces[0]
+        .children
+        .iter()
+        .any(|object| object.id == "fable-provider" || object.id == "claude-fable-value-dark"));
+}
+
+#[test]
+fn horizontal_fable_columns_follow_claude_visibility_and_usage_direction() {
+    use crate::models::{UsageData, UsageLimit, UsageSection};
+
+    let usage = AppUsageData::from_iter([(
+        ProviderId::Claude,
+        UsageData {
+            limits: vec![UsageLimit {
+                stale: false,
+                key: "weekly_scoped_fable".into(),
+                kind: "weekly_scoped".into(),
+                model: Some("Fable".into()),
+                usage: UsageSection {
+                    available: true,
+                    percentage: 43.0,
+                    resets_at: None,
+                },
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )]);
+    for theme in [
+        ThemeDocument::starter(),
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap(),
+    ] {
+        let surface = &theme.surfaces[0];
+        let fable_index = surface
+            .children
+            .iter()
+            .position(|object| {
+                object.id == "fable-provider" || object.id == "claude-fable-value-dark"
+            })
+            .unwrap();
+        let disabled = ThemeRuntime::new(false, true, false);
+        assert_eq!(
+            resolve_surface_size(&theme, 0, Some(&usage), disabled),
+            resolve_surface_size(&theme, 0, None, disabled),
+            "{} must not reserve Fable space when Claude is disabled",
+            theme.name
+        );
+        assert!(
+            resolve_object_bounds_with_runtime(&theme, 0, fable_index, Some(&usage), disabled)
+                .is_none()
+        );
+        for (countdown, percentage, text) in [(false, 43.0, "Fable 43%"), (true, 57.0, "Fable 57%")]
+        {
+            let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled(ProviderId::ALL))
+                .with_countdown(countdown);
+            let (width, height) = resolve_surface_size(&theme, 0, Some(&usage), runtime);
+            let canvas = Canvas {
+                width,
+                height,
+                ..Default::default()
+            };
+            let mut context = DataContext::from_usage_with_runtime(Some(&usage), &canvas, runtime);
+            for dark in [false, true] {
+                context.insert("system.dark", dark as u8 as f64);
+                for object in surface
+                    .children
+                    .iter()
+                    .filter(|object| {
+                        object.parent.as_deref() == Some("fable-provider")
+                            || object.id.starts_with("claude-fable-")
+                    })
+                    .filter(|object| evaluate(&object.render.0, &context).unwrap() != 0.0)
+                {
+                    match &object.content {
+                        SceneContent::Progress { value, .. } => {
+                            assert_eq!(evaluate(&value.0, &context).unwrap(), percentage);
+                        }
+                        SceneContent::Text { template, .. } => {
+                            assert_eq!(
+                                format_template(template, &context),
+                                if theme.id == CLASSIC_THEME_ID {
+                                    format!("F {percentage:.0}% · --")
+                                } else {
+                                    format!("{text} · --")
+                                }
+                            );
+                        }
+                        _ => panic!("unexpected Fable content"),
+                    }
+                }
+            }
+            for (index, object) in surface.children.iter().enumerate() {
+                if object.parent.as_deref() != Some("provider-row") {
+                    continue;
+                }
+                let (x, y, w, h) =
+                    resolve_object_bounds_with_runtime(&theme, 0, index, Some(&usage), runtime)
+                        .unwrap();
+                assert!(x >= 0.0 && x + w <= width as f64, "{}", object.id);
+                assert!(y >= 0.0 && y + h <= height as f64, "{}", object.id);
+            }
+            let rendered = render_theme_surface_with_runtime(&theme, 0, Some(&usage), runtime);
+            assert!(rendered.warnings.is_empty(), "{:?}", rendered.warnings);
+        }
+    }
+}
+
+#[test]
 fn starter_theme_round_trips_and_validates() {
     let theme = ThemeDocument::starter();
     assert!(theme.validate().is_empty());
@@ -863,7 +1107,7 @@ fn starter_theme_round_trips_and_validates() {
     // three providers that report credits, plus compact two-segment Fable.
     assert_eq!(
         segments,
-        [vec![10; 5 * 2 * 2 + 2 + 3 * 2], vec![2; 2]].concat()
+        [vec![10; 5 * 2 * 2 + 2 * 2 + 3 * 2], vec![2; 2]].concat()
     );
     assert!(theme.surfaces[0]
         .children
@@ -1007,6 +1251,29 @@ fn provider_specific_long_window_labels_are_available_to_templates() {
 }
 
 #[test]
+fn provider_specific_session_window_labels_are_available_to_templates() {
+    // Cursor reports a seven-day included-usage window rather than the default
+    // five-hour session, so themes can show the real period length.
+    let usage = crate::models::AppUsageData::from_iter([(
+        ProviderId::Cursor,
+        crate::models::UsageData {
+            session_label: Some("7d".into()),
+            ..Default::default()
+        },
+    )]);
+    let context = DataContext::from_usage(Some(&usage), &Canvas::default());
+    assert_eq!(format_template("{cursor.session.label}", &context), "7d");
+    assert_eq!(format_template("{claude.session.label}", &context), "5h");
+    let localized = DataContext::from_usage_with_runtime(
+        Some(&usage),
+        &Canvas::default(),
+        ThemeRuntime::default().with_language(LanguageId::from_code("nl").unwrap()),
+    );
+    assert_eq!(format_template("{cursor.session.label}", &localized), "7d");
+    assert_eq!(format_template("{claude.session.label}", &localized), "5u");
+}
+
+#[test]
 fn opencode_monthly_window_is_available_to_templates_when_present() {
     let reset = std::time::SystemTime::now() + std::time::Duration::from_secs(1_713_621);
     let usage = crate::models::AppUsageData::from_iter([(
@@ -1051,7 +1318,17 @@ fn opencode_monthly_window_is_available_to_templates_when_present() {
 #[test]
 fn starter_theme_renders_transparent_pixels_at_declared_size() {
     let theme = ThemeDocument::starter();
-    let rendered = render_theme(&theme, None);
+    let usage = AppUsageData::from_iter([(
+        ProviderId::Claude,
+        crate::models::UsageData {
+            session: crate::models::UsageSection {
+                available: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )]);
+    let rendered = render_theme(&theme, Some(&usage));
     assert_eq!((rendered.width, rendered.height), (237, 46));
     assert_eq!(rendered.pixels.len(), 237 * 46);
     assert!(rendered.pixels.iter().any(|pixel| pixel >> 24 > 0));
@@ -1087,6 +1364,75 @@ fn empty_text_output_is_a_safe_noop() {
         },
     );
     assert_eq!(pixels, original);
+}
+
+#[test]
+fn font_override_bypasses_wider_theme_fonts_without_changing_default_rendering() {
+    for scale in [1.0_f64, 1.25, 1.5, 1.75, 2.0] {
+        let render = |family: &str, windows_default: bool, width: f64| {
+            let mut theme = ThemeDocument::starter();
+            let mut root = SceneObject::object("font-check", "Font check");
+            root.width = width.into();
+            root.height = 13.0.into();
+            root.content = SceneContent::Text {
+                template: "13% · 4.5h".into(),
+                font_family: family.into(),
+                font_size: 12.0.into(),
+                weight: FontWeight::Medium,
+                rendering: FontRendering::ClearType,
+                contrast: 1.0.into(),
+                align: TextAlign::Left,
+                color: Paint::new("#FFFFFFFF"),
+            };
+            theme.surfaces = vec![root];
+            let rendered = render_theme_surface_with_runtime_at_scale(
+                &theme,
+                0,
+                None,
+                ThemeRuntime::default().with_windows_default_font(windows_default),
+                scale,
+            );
+            assert!(rendered.warnings.is_empty());
+            rendered
+        };
+        let default = render("Verdana", true, 62.0);
+        // The enabled/default path still uses the font stored in the theme.
+        let mut expected = vec![0; default.pixels.len()];
+        render_text_mask(
+            &mut expected,
+            default.width,
+            default.height,
+            "13% · 4.5h",
+            "Verdana",
+            12.0 * scale,
+            500,
+            FontRendering::ClearType,
+            1.0,
+            TextAlign::Left,
+            Rgba {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+        );
+        assert_eq!(default.pixels, expected);
+        let forced = render("Verdana", false, 62.0);
+        assert_eq!(forced.pixels, render("Tahoma", false, 62.0).pixels);
+        assert!(forced.pixels.iter().any(|p| *p != 0));
+        let full = render("Verdana", false, 200.0);
+        for y in 0..forced.height as usize {
+            assert_eq!(
+                forced.pixels[y * forced.width as usize..(y + 1) * forced.width as usize],
+                full.pixels
+                    [y * full.width as usize..y * full.width as usize + forced.width as usize],
+                "forced Segoe UI must fit the existing box at scale {scale}",
+            );
+        }
+        if scale == 1.5 {
+            assert_ne!(default.pixels, forced.pixels);
+        }
+    }
 }
 
 #[test]
@@ -1225,6 +1571,46 @@ fn compact_quad_only_grows_when_the_automatic_floating_card_is_present() {
 }
 
 #[test]
+fn compact_fluent_quad_adds_a_fable_column_when_the_limit_is_available() {
+    use crate::models::{UsageData, UsageLimit, UsageSection};
+
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+    let usage = AppUsageData::from_iter([(
+        ProviderId::Claude,
+        UsageData {
+            limits: vec![UsageLimit {
+                stale: false,
+                key: "weekly_scoped_fable".into(),
+                kind: "weekly_scoped".into(),
+                label: "Fable".into(),
+                model: Some("Fable".into()),
+                model_id: None,
+                scope: None,
+                is_active: true,
+                usage: UsageSection {
+                    available: true,
+                    percentage: 43.0,
+                    resets_at: None,
+                },
+            }],
+            ..Default::default()
+        },
+    )]);
+    let runtime = ThemeRuntime::new(true, false, false);
+    let (base_width, height) = resolve_surface_size(&theme, 0, None, runtime);
+
+    assert_eq!(
+        resolve_surface_size(&theme, 0, Some(&usage), runtime),
+        (base_width + 96, height)
+    );
+    assert!(theme.surfaces[0]
+        .children
+        .iter()
+        .any(|object| object.id == "fable-provider" || object.id == "claude-fable-value-dark"));
+}
+
+#[test]
 fn segmented_progress_reserves_gaps_only_between_segments() {
     let mask = (0..34)
         .map(|position| segmented_position_visible(position, 34, 5, 1.0))
@@ -1240,6 +1626,88 @@ fn segmented_progress_reserves_gaps_only_between_segments() {
     );
     assert!(mask[0]);
     assert!(mask[33]);
+}
+
+#[test]
+fn segmented_progress_snaps_segments_and_gaps_to_whole_pixels() {
+    // The classic widget bar is 10 segments of 10 logical px with 1 px gaps.
+    for (scale, segment, gap) in [
+        (1.0, 10, 1),
+        (1.25, 12, 1),
+        (1.5, 14, 2),
+        (1.75, 17, 2),
+        (2.0, 20, 2),
+    ] {
+        let extent = (109.0_f64 * scale).round() as u32;
+        let layout = SegmentLayout::new(extent, 10, scale).unwrap();
+        assert_eq!(
+            (layout.segment, layout.gap),
+            (segment, gap),
+            "scale={scale}"
+        );
+        assert!(layout.extent() <= extent, "scale={scale}");
+
+        let mut runs = Vec::new();
+        for position in 0..extent {
+            let visible = segmented_position_visible(position, extent, 10, scale);
+            match runs.last_mut() {
+                Some((kind, length)) if *kind == visible => *length += 1,
+                _ => runs.push((visible, 1)),
+            }
+        }
+        if runs.last().is_some_and(|(visible, _)| !visible) {
+            runs.pop();
+        }
+        assert_eq!(runs.len(), 19, "scale={scale}");
+        for (index, (visible, length)) in runs.into_iter().enumerate() {
+            assert_eq!(visible, index % 2 == 0, "scale={scale}");
+            assert_eq!(length, if visible { segment } else { gap }, "scale={scale}");
+        }
+    }
+}
+
+#[test]
+fn right_to_left_segments_anchor_at_the_right_edge() {
+    let white = Rgba {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+    // 164 px at 150%: 10 x 14 px segments with 2 px gaps use 158 px.
+    let mut pixels = vec![0; 164];
+    draw_progress(
+        &mut pixels,
+        164,
+        1,
+        white,
+        0.0,
+        1.0,
+        ProgressDirection::RightToLeft,
+        10,
+        1.5,
+    );
+    assert!(pixels[..6].iter().all(|pixel| *pixel == 0));
+    assert_ne!(pixels[6], 0);
+    assert_ne!(pixels[163], 0);
+    assert_eq!(pixels[163 - 14], 0);
+
+    // Partial fills are measured against the drawn bar, not the box.
+    let mut pixels = vec![0; 164];
+    draw_progress(
+        &mut pixels,
+        164,
+        1,
+        white,
+        0.0,
+        0.5,
+        ProgressDirection::LeftToRight,
+        10,
+        1.5,
+    );
+    // Half of 158 px ends at pixel 78, inside the gap after segment five.
+    assert_ne!(pixels[77], 0);
+    assert!(pixels[78..].iter().all(|pixel| *pixel == 0));
 }
 
 #[test]
@@ -1266,6 +1734,144 @@ fn segmented_progress_preserves_both_rounded_outer_edges() {
     assert_ne!(pixels[6 * 34 + 33], 0);
     for gap in [6, 13, 20, 27] {
         assert_eq!(pixels[6 * 34 + gap], 0);
+    }
+}
+
+#[test]
+fn segmented_progress_without_visible_gaps_keeps_the_full_extent() {
+    let white = Rgba {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+    for gap in [0.0, 0.4, -1.0, f64::NAN, f64::INFINITY, 10.0] {
+        // Ten segments cannot fit nine one-pixel gaps into an 18-pixel box.
+        for direction in [
+            ProgressDirection::LeftToRight,
+            ProgressDirection::RightToLeft,
+            ProgressDirection::TopToBottom,
+            ProgressDirection::BottomToTop,
+        ] {
+            let horizontal = matches!(
+                direction,
+                ProgressDirection::LeftToRight | ProgressDirection::RightToLeft
+            );
+            let (width, height) = if horizontal { (18, 3) } else { (3, 18) };
+            for amount in [0.0, 0.25, 0.5, 1.0] {
+                let mut segmented = vec![0; (width * height) as usize];
+                let mut continuous = segmented.clone();
+                draw_progress(
+                    &mut segmented,
+                    width,
+                    height,
+                    white,
+                    1.0,
+                    amount,
+                    direction,
+                    10,
+                    gap,
+                );
+                draw_progress(
+                    &mut continuous,
+                    width,
+                    height,
+                    white,
+                    1.0,
+                    amount,
+                    direction,
+                    1,
+                    0.0,
+                );
+                assert_eq!(
+                    segmented, continuous,
+                    "gap={gap}, direction={direction:?}, amount={amount}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn segmented_progress_matches_across_directions_at_fractional_scales() {
+    let white = Rgba {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+    for scale in [1.0, 1.25, 1.5, 1.75, 2.0, 3.0] {
+        let extent = (109.0_f64 * scale).round() as u32;
+        let thickness = (8.0_f64 * scale).round() as u32;
+        for amount in [0.0, 0.01, 0.25, 0.5, 0.99, 1.0] {
+            let mut forward = vec![0; (extent * thickness) as usize];
+            draw_progress(
+                &mut forward,
+                extent,
+                thickness,
+                white,
+                2.0 * scale,
+                amount,
+                ProgressDirection::LeftToRight,
+                10,
+                scale,
+            );
+            for direction in [
+                ProgressDirection::RightToLeft,
+                ProgressDirection::TopToBottom,
+                ProgressDirection::BottomToTop,
+            ] {
+                let (width, height) = if direction == ProgressDirection::RightToLeft {
+                    (extent, thickness)
+                } else {
+                    (thickness, extent)
+                };
+                let mut actual = vec![0; forward.len()];
+                draw_progress(
+                    &mut actual,
+                    width,
+                    height,
+                    white,
+                    2.0 * scale,
+                    amount,
+                    direction,
+                    10,
+                    scale,
+                );
+                for y in 0..thickness {
+                    for x in 0..extent {
+                        let index = match direction {
+                            ProgressDirection::RightToLeft => y * extent + extent - 1 - x,
+                            ProgressDirection::TopToBottom => x * thickness + y,
+                            ProgressDirection::BottomToTop => (extent - 1 - x) * thickness + y,
+                            _ => unreachable!(),
+                        };
+                        assert_eq!(
+                            actual[index as usize],
+                            forward[(y * extent + x) as usize],
+                            "scale={scale}, amount={amount}, direction={direction:?}, x={x}, y={y}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn segmented_layout_stays_in_bounds_for_extreme_inputs() {
+    for extent in [0, 1, 2, 19, 109, 164, u32::MAX] {
+        for count in [0, 1, 2, 10, u16::MAX as u32, u32::MAX] {
+            for gap in [-1.0, 0.0, 0.4, 1.0, 1.5, f64::MAX, f64::NAN, f64::INFINITY] {
+                if let Some(layout) = SegmentLayout::new(extent, count, gap) {
+                    assert!(layout.extent() <= extent);
+                    assert!(layout.segment > 0);
+                    assert!(layout.contains(0));
+                    assert!(layout.contains(layout.extent() - 1));
+                    assert!(!layout.contains(layout.extent()));
+                }
+            }
+        }
     }
 }
 
@@ -1533,8 +2139,13 @@ fn starter_adapts_width_segments_and_collapsed_provider_rows() {
             10,
         ),
         (
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Copilot])),
+            237,
+            10,
+        ),
+        (
             ThemeRuntime::from_providers(ProviderSet::from_enabled(ProviderId::ALL)),
-            755,
+            865,
             2,
         ),
     ] {
@@ -1610,7 +2221,7 @@ fn starter_has_a_taskbar_widget_and_provider_tray_icons() {
         theme.surfaces[0].placement.reference.region,
         ReferenceRegion::SystemTray
     );
-    assert_eq!(theme.surfaces.len(), 7);
+    assert_eq!(theme.surfaces.len(), 8);
     assert!(theme.surfaces[1..]
         .iter()
         .all(|surface| surface.placement.nest == SurfaceNest::TrayIcon));
@@ -1664,9 +2275,10 @@ fn starter_tray_icons_follow_enabled_providers() {
 
 #[test]
 fn built_in_themes_are_valid_and_cannot_be_saved_as_editable_themes() {
-    assert_eq!(BUILTIN_THEME_SOURCES.len(), 2);
+    assert_eq!(BUILTIN_THEME_SOURCES.len(), 3);
     assert_eq!(BUILTIN_THEME_SOURCES[0].0, CLASSIC_THEME_ID);
     assert_eq!(BUILTIN_THEME_SOURCES[1].0, COMPACT_FLUENT_QUAD_THEME_ID);
+    assert_eq!(BUILTIN_THEME_SOURCES[2].0, CLASSIC_VERTICAL_THEME_ID);
     assert!(REMOVED_BUILTIN_THEME_IDS
         .iter()
         .all(|id| !is_builtin_theme_id(id)));
@@ -1707,8 +2319,146 @@ fn built_in_themes_are_valid_and_cannot_be_saved_as_editable_themes() {
 }
 
 #[test]
+fn classic_vertical_stacks_enabled_providers_and_preserves_tray_roots() {
+    let mut theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/classic-vertical.json")).unwrap();
+    theme.prepare_runtime();
+    let classic = ThemeDocument::starter();
+    assert_eq!(theme.surfaces.len(), classic.surfaces.len());
+    for (vertical, original) in theme.surfaces.iter().zip(&classic.surfaces).skip(1) {
+        assert_eq!(
+            serde_json::to_value(vertical).unwrap(),
+            serde_json::to_value(original).unwrap()
+        );
+    }
+    for providers in [
+        ProviderSet::from_enabled([ProviderId::Codex]),
+        ProviderSet::from_enabled([ProviderId::Claude, ProviderId::Copilot]),
+        ProviderSet::from_enabled(ProviderId::ALL),
+    ] {
+        for host_width in [46, 62, 100] {
+            let runtime =
+                ThemeRuntime::from_providers(providers).with_host_dimensions(host_width, 1440);
+            let width = (host_width - 2).min(62);
+            let provider_height = |provider| match provider {
+                ProviderId::Grok | ProviderId::Copilot => 42,
+                _ => 64,
+            };
+            let height = providers.iter().map(provider_height).sum();
+            assert_eq!(
+                resolve_surface_size(&theme, 0, None, runtime),
+                (width, height)
+            );
+            let rendered = render_theme_surface_with_runtime(&theme, 0, None, runtime);
+            assert!(rendered.warnings.is_empty(), "{:?}", rendered.warnings);
+            assert!(rendered.pixels.iter().any(|pixel| pixel >> 24 > 0));
+            let mut y = 0;
+            for provider in providers.iter() {
+                let id = format!("{}-provider", provider.descriptor().key);
+                let index = theme.surfaces[0]
+                    .children
+                    .iter()
+                    .position(|layer| layer.id == id)
+                    .unwrap();
+                assert_eq!(
+                    resolve_object_bounds_with_runtime(&theme, 0, index, None, runtime),
+                    Some((
+                        0.0,
+                        y as f64,
+                        width as f64,
+                        provider_height(provider) as f64
+                    ))
+                );
+                y += provider_height(provider);
+            }
+        }
+    }
+}
+
+#[test]
+fn classic_vertical_formats_monthly_limits_and_countdown_badges() {
+    use crate::models::{UsageData, UsageSection};
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/classic-vertical.json")).unwrap();
+    let usage = AppUsageData::from_iter([(
+        ProviderId::Codex,
+        UsageData {
+            weekly: UsageSection {
+                available: true,
+                percentage: 42.0,
+                resets_at: None,
+            },
+            weekly_label: Some("30d".into()),
+            ..Default::default()
+        },
+    )]);
+    for (countdown, expected) in [(false, "30d 42%"), (true, "30d 58%")] {
+        let runtime = ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Codex]))
+            .with_poll_state(true, false)
+            .with_countdown(countdown)
+            .with_host_dimensions(62, 1440);
+        let context =
+            DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
+        let text = theme.surfaces[0]
+            .children
+            .iter()
+            .find(|object| object.id == "codex-weekly-value-dark")
+            .unwrap();
+        let SceneContent::Text { template, .. } = &text.content else {
+            panic!("missing usage badge")
+        };
+        assert_eq!(format_template(template, &context), expected);
+        let rendered =
+            render_theme_surface_with_runtime_at_scale(&theme, 0, Some(&usage), runtime, 1.25);
+        assert_eq!((rendered.width, rendered.height), (75, 80));
+        assert!(rendered.warnings.is_empty(), "{:?}", rendered.warnings);
+    }
+}
+
+#[test]
+fn classic_vertical_headings_remain_legible_on_taskbars_and_floating_cards() {
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/classic-vertical.json")).unwrap();
+    let luminance = |color: Rgba| {
+        let linear = |channel: u8| {
+            let value = f64::from(channel) / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    };
+    for (suffix, backgrounds) in [
+        ("-light", ["#CBD4E6", "#D3D3D3", "#FFFFFF", "#F3F3F3"]),
+        ("", ["#010A1C", "#181820", "#141E34", "#182137"]),
+    ] {
+        for provider in ProviderId::ALL {
+            let id = format!("{}-title{suffix}", provider.descriptor().key);
+            let title = theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .unwrap();
+            let SceneContent::Text { color, .. } = &title.content else {
+                panic!("missing heading");
+            };
+            let foreground = luminance(parse_color(&color.color).unwrap());
+            // Include the tinted Windows 10 VM taskbar and floating card.
+            for background in backgrounds {
+                let background = luminance(parse_color(background).unwrap());
+                let contrast =
+                    (background.max(foreground) + 0.05) / (background.min(foreground) + 0.05);
+                assert!(contrast >= 4.5, "{id}: contrast={contrast}");
+            }
+        }
+    }
+}
+
+#[test]
 fn compact_fluent_quad_widget_respects_usage_direction() {
-    use crate::models::{CreditsSection, UsageData, UsageSection};
+    use crate::models::{CreditsSection, UsageData, UsageLimit, UsageSection};
 
     let theme: ThemeDocument =
         serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
@@ -1723,10 +2473,31 @@ fn compact_fluent_quad_widget_respects_usage_direction() {
             UsageData {
                 session: section.clone(),
                 weekly: section.clone(),
+                limits: (provider == ProviderId::Claude)
+                    .then(|| UsageLimit {
+                        stale: false,
+                        key: "weekly_scoped_fable".into(),
+                        kind: "weekly_scoped".into(),
+                        label: "Fable".into(),
+                        model: Some("Fable".into()),
+                        model_id: None,
+                        scope: None,
+                        is_active: true,
+                        usage: section.clone(),
+                    })
+                    .into_iter()
+                    .collect(),
                 credits: Some(CreditsSection {
                     percentage: 25.0,
                     remaining: 24.1,
                     total: 40.83,
+                }),
+                external_pool: (provider == ProviderId::Antigravity).then(|| {
+                    Box::new(UsageData {
+                        session: section.clone(),
+                        weekly: section.clone(),
+                        ..Default::default()
+                    })
                 }),
                 ..Default::default()
             },
@@ -2607,6 +3378,96 @@ fn display_summaries_preserve_status_reset_formatting_and_legacy_tokens() {
 }
 
 #[test]
+fn copilot_tray_badges_follow_usage_direction_and_keep_warning_thresholds() {
+    use crate::models::{UsageData, UsageSection};
+
+    for theme in [
+        ThemeDocument::starter(),
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap(),
+    ] {
+        assert!(theme.validate().is_empty());
+        let surface = theme
+            .surfaces
+            .iter()
+            .find(|surface| surface.id == "copilot-tray-icon")
+            .unwrap();
+        let runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Copilot]));
+        let loading = DataContext::from_usage_with_runtime(None, &Canvas::default(), runtime);
+        let placeholder = surface
+            .children
+            .iter()
+            .find(|object| object.id == "copilot-tray-placeholder")
+            .unwrap();
+        assert_ne!(evaluate(&placeholder.render.0, &loading).unwrap(), 0.0);
+        let SceneContent::Text { template, .. } = &placeholder.content else {
+            panic!("Copilot placeholder must contain text");
+        };
+        assert_eq!(format_template(template, &loading), "Cp");
+
+        for spent in [
+            0.0, 5.0, 9.49, 9.5, 42.0, 90.0, 90.5, 95.0, 99.49, 99.5, 100.0,
+        ] {
+            for countdown in [false, true] {
+                let usage = AppUsageData::from_iter([(
+                    ProviderId::Copilot,
+                    UsageData {
+                        weekly: UsageSection {
+                            available: true,
+                            percentage: spent,
+                            resets_at: None,
+                        },
+                        ..Default::default()
+                    },
+                )]);
+                let context = DataContext::from_usage_with_runtime(
+                    Some(&usage),
+                    &Canvas::default(),
+                    runtime.with_countdown(countdown),
+                );
+                let badges: Vec<_> = surface
+                    .children
+                    .iter()
+                    .filter(|object| {
+                        object.id.contains("digit")
+                            && evaluate(&object.render.0, &context).unwrap() != 0.0
+                    })
+                    .collect();
+                assert_eq!(
+                    badges.len(),
+                    1,
+                    "{}: {spent}, countdown={countdown}",
+                    theme.id
+                );
+                let badge = badges[0];
+                assert_eq!(badge.id.contains("high"), spent >= 90.0);
+                let displayed = if countdown { 100.0 - spent } else { spent };
+                let SceneContent::Text {
+                    template,
+                    font_size,
+                    ..
+                } = &badge.content
+                else {
+                    panic!("Copilot badge must contain text");
+                };
+                assert_eq!(
+                    format_template(template, &context),
+                    format!("{displayed:.0}")
+                );
+                let expected_size = if displayed < 9.5 {
+                    50.0
+                } else if displayed < 99.5 {
+                    42.0
+                } else {
+                    30.0
+                };
+                assert_eq!(evaluate(&font_size.0, &context).unwrap(), expected_size);
+            }
+        }
+    }
+}
+
+#[test]
 fn the_classic_theme_shows_one_badge_digit_group_in_both_usage_directions() {
     use crate::models::{UsageData, UsageSection};
 
@@ -2697,4 +3558,199 @@ fn action_values_are_found_around_the_caret() {
     assert_eq!(at("open_url(\"https://|\")"), None);
     assert_eq!(at(r#"layer_actions("toggle(self, |render)")"#), None);
     assert_eq!(at(r#"layer_actions(|"set(self, x, 1)")"#), None);
+}
+
+#[test]
+fn compact_fluent_quad_antigravity_dual_and_solo_modes() {
+    use crate::models::{UsageData, UsageSection};
+
+    let theme: ThemeDocument =
+        serde_json::from_str(include_str!("../themes/compact-fluent-quad.json")).unwrap();
+
+    let gemini_section = UsageSection {
+        available: true,
+        percentage: 30.0,
+        resets_at: None,
+    };
+    let external_section = UsageSection {
+        available: true,
+        percentage: 70.0,
+        resets_at: None,
+    };
+
+    let mut usage = AppUsageData::default();
+    usage.insert(
+        ProviderId::Antigravity,
+        UsageData {
+            session: gemini_section.clone(),
+            weekly: gemini_section.clone(),
+            external_pool: Some(Box::new(UsageData {
+                session: external_section.clone(),
+                weekly: external_section.clone(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        },
+    );
+
+    // 1. Solo Gemini
+    {
+        let runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+                .with_antigravity_pools(true, false, 1.0);
+        let mut context =
+            DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
+        context.insert("system.dark", 1.0);
+        assert_eq!(evaluate("antigravity.dual_mode", &context).unwrap(), 0.0);
+        assert_eq!(
+            evaluate("antigravity.gemini.enabled", &context).unwrap(),
+            1.0
+        );
+        assert_eq!(
+            evaluate("antigravity.external.enabled", &context).unwrap(),
+            0.0
+        );
+
+        let find_render = |id: &str| {
+            theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| evaluate(&o.render.0, &context).unwrap() != 0.0)
+                .unwrap_or(false)
+        };
+
+        assert!(find_render("antigravity-session-gemini-solo-dark"));
+        assert!(!find_render("antigravity-session-external-solo-dark"));
+        assert!(!find_render("antigravity-session-gemini-dual-dark"));
+        assert!(!find_render("antigravity-session-external-dual-dark"));
+        assert!(find_render("antigravity-session-gemini-value-dark"));
+        assert!(!find_render("antigravity-session-external-value-dark"));
+    }
+
+    // 2. Solo External
+    {
+        let runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+                .with_antigravity_pools(false, true, 1.0);
+        let mut context =
+            DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
+        context.insert("system.dark", 1.0);
+        assert_eq!(evaluate("antigravity.dual_mode", &context).unwrap(), 0.0);
+        assert_eq!(
+            evaluate("antigravity.gemini.enabled", &context).unwrap(),
+            0.0
+        );
+        assert_eq!(
+            evaluate("antigravity.external.enabled", &context).unwrap(),
+            1.0
+        );
+
+        let find_render = |id: &str| {
+            theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| evaluate(&o.render.0, &context).unwrap() != 0.0)
+                .unwrap_or(false)
+        };
+
+        assert!(!find_render("antigravity-session-gemini-solo-dark"));
+        assert!(find_render("antigravity-session-external-solo-dark"));
+        assert!(!find_render("antigravity-session-gemini-dual-dark"));
+        assert!(!find_render("antigravity-session-external-dual-dark"));
+        assert!(!find_render("antigravity-session-gemini-value-dark"));
+        assert!(find_render("antigravity-session-external-value-dark"));
+    }
+
+    // 3. Dual Mode Crossfade
+    {
+        // At opacity 1.0 (Gemini holding)
+        let runtime =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+                .with_antigravity_pools(true, true, 1.0);
+        let mut context =
+            DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime);
+        context.insert("system.dark", 1.0);
+        assert_eq!(evaluate("antigravity.dual_mode", &context).unwrap(), 1.0);
+
+        let find_render = |id: &str| {
+            theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| evaluate(&o.render.0, &context).unwrap() != 0.0)
+                .unwrap_or(false)
+        };
+
+        assert!(!find_render("antigravity-session-gemini-solo-dark"));
+        assert!(!find_render("antigravity-session-external-solo-dark"));
+        assert!(find_render("antigravity-session-gemini-dual-dark"));
+        assert!(find_render("antigravity-session-external-dual-dark"));
+        assert!(find_render("antigravity-session-gemini-value-dark"));
+        assert!(!find_render("antigravity-session-external-value-dark"));
+
+        // At opacity 0.5 (Mid-transition)
+        let runtime_mid =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+                .with_antigravity_pools(true, true, 0.5);
+        let mut context_mid =
+            DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime_mid);
+        context_mid.insert("system.dark", 1.0);
+        let find_render_mid = |id: &str| {
+            theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| evaluate(&o.render.0, &context_mid).unwrap() != 0.0)
+                .unwrap_or(false)
+        };
+        assert!(find_render_mid("antigravity-session-gemini-value-dark"));
+        assert!(find_render_mid("antigravity-session-external-value-dark"));
+
+        // At opacity 0.0 (External holding)
+        let runtime_ext =
+            ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+                .with_antigravity_pools(true, true, 0.0);
+        let mut context_ext =
+            DataContext::from_usage_with_runtime(Some(&usage), &Canvas::default(), runtime_ext);
+        context_ext.insert("system.dark", 1.0);
+        let find_render_ext = |id: &str| {
+            theme.surfaces[0]
+                .children
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| evaluate(&o.render.0, &context_ext).unwrap() != 0.0)
+                .unwrap_or(false)
+        };
+        assert!(!find_render_ext("antigravity-session-gemini-value-dark"));
+        assert!(find_render_ext("antigravity-session-external-value-dark"));
+    }
+}
+
+#[test]
+fn missing_antigravity_external_pool_draws_an_empty_gauge() {
+    use crate::models::{UsageData, UsageSection};
+
+    let usage = AppUsageData::from_iter([(
+        ProviderId::Antigravity,
+        UsageData {
+            session: UsageSection {
+                available: true,
+                percentage: 25.0,
+                resets_at: None,
+            },
+            ..Default::default()
+        },
+    )]);
+    let context = DataContext::from_usage_with_runtime(
+        Some(&usage),
+        &Canvas::default(),
+        ThemeRuntime::from_providers(ProviderSet::from_enabled([ProviderId::Antigravity]))
+            .with_countdown(true),
+    );
+    let value = |expression: &str| evaluate(expression, &context).unwrap();
+    assert_eq!(value("antigravity.gemini.session.display"), 75.0);
+    assert_eq!(value("antigravity.gemini.weekly.display"), 0.0);
+    assert_eq!(value("antigravity.external.session.display"), 0.0);
 }

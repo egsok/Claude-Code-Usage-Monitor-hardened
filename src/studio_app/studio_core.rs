@@ -42,10 +42,22 @@ pub(super) fn save_edited_settings(
         if previous.taskbar_auto_eject != edited.taskbar_auto_eject {
             current.taskbar_auto_eject = edited.taskbar_auto_eject;
         }
+        if previous.lock_taskbar != edited.lock_taskbar {
+            current.lock_taskbar = edited.lock_taskbar;
+        }
+        if previous.use_windows_default_font != edited.use_windows_default_font {
+            current.use_windows_default_font = edited.use_windows_default_font;
+        }
         for provider in crate::providers::ProviderId::ALL {
             if previous.provider_enabled(provider) != edited.provider_enabled(provider) {
                 current.set_provider_enabled(provider, edited.provider_enabled(provider));
             }
+        }
+        if previous.antigravity_gemini_enabled() != edited.antigravity_gemini_enabled() {
+            current.set_antigravity_gemini_enabled(edited.antigravity_gemini_enabled());
+        }
+        if previous.antigravity_external_enabled() != edited.antigravity_external_enabled() {
+            current.set_antigravity_external_enabled(edited.antigravity_external_enabled());
         }
         if previous.accounts.claude != edited.accounts.claude {
             current.accounts.claude = edited.accounts.claude.clone();
@@ -92,6 +104,12 @@ impl StudioApp {
             .with_poll_state(self.usage_poll_ok, self.usage_has_error)
             .with_language(language)
             .with_countdown(self.settings.usage_countdown)
+            .with_windows_default_font(self.settings.use_windows_default_font)
+            .with_antigravity_pools(
+                self.settings.antigravity_gemini_enabled(),
+                self.settings.antigravity_external_enabled(),
+                1.0,
+            )
     }
 
     pub(super) fn theme_runtime_for_surface(&self, surface_index: usize) -> ThemeRuntime {
@@ -114,13 +132,21 @@ impl StudioApp {
         owner: isize,
         initial_page: Page,
     ) -> Self {
+        style_native_titlebar(context);
+        Self::new_with_context(&context.egui_ctx, owner, initial_page)
+    }
+
+    pub(super) fn new_with_context(
+        context: &egui::Context,
+        owner: isize,
+        initial_page: Page,
+    ) -> Self {
         crate::diagnose::log_lazy(|| format!("dashboard started owner={owner}"));
         let settings = app_settings::load_settings();
         let language = localization::resolve_language(
             settings.language.as_deref().and_then(LanguageId::from_code),
         );
-        configure_style(&context.egui_ctx, language);
-        style_native_titlebar(context);
+        configure_style(context, language);
         let classic_theme_path = theme_engine::ensure_starter_theme().ok();
         let configured_path = settings.active_theme_path.as_ref().map(PathBuf::from);
         let configured_theme = configured_path
@@ -165,15 +191,17 @@ impl StudioApp {
             diagnostics: studio_diagnostics::DiagnosticsView::new(),
             page: initial_page,
             synced_poll_interval_ms: settings.poll_interval_ms,
+            synced_taskbar_lock: settings.lock_taskbar,
             poll_interval_editor_generation: 0,
             settings,
             startup_enabled: crate::window::is_startup_enabled(),
             theme,
             theme_path,
+            available_themes: AvailableThemesCache::new(theme_engine::themes_directory()),
             selection: Selection::Surface(0),
             preview: None,
             preview_dirty: true,
-            preview_renderer: PreviewRenderer::new(context.egui_ctx.clone()),
+            preview_renderer: PreviewRenderer::new(context.clone()),
             preview_generation: 0,
             preview_render_key: None,
             usage,
@@ -217,16 +245,7 @@ impl StudioApp {
     }
 
     pub(super) fn notify_owner(&self) {
-        if self.owner != 0 {
-            unsafe {
-                let _ = PostMessageW(
-                    Some(HWND(self.owner as *mut _)),
-                    WM_APP_SETTINGS_UPDATED,
-                    WPARAM(0),
-                    LPARAM(0),
-                );
-            }
-        }
+        let _ = studio_diagnostics::send_owner_message(self.owner, WM_APP_SETTINGS_UPDATED);
     }
 
     pub(super) fn request_refresh(&mut self) {
@@ -258,11 +277,20 @@ impl StudioApp {
         self.synced_poll_interval_ms = persisted_interval;
     }
 
+    pub(super) fn sync_taskbar_lock(&mut self, persisted_lock: bool) {
+        // Preserve a local toggle; unrelated edits adopt the latest menu value.
+        if self.settings.lock_taskbar == self.synced_taskbar_lock {
+            self.settings.lock_taskbar = persisted_lock;
+        }
+        self.synced_taskbar_lock = persisted_lock;
+    }
+
     pub(super) fn save_settings(&mut self, previous: &SettingsFile) {
         match save_edited_settings(previous, &self.settings) {
             Ok(settings) => {
                 self.settings = settings;
                 self.synced_poll_interval_ms = self.settings.poll_interval_ms;
+                self.synced_taskbar_lock = self.settings.lock_taskbar;
                 self.settings_error = None;
                 self.notify_owner();
             }
@@ -297,6 +325,7 @@ impl StudioApp {
             }
         };
         self.theme_path = Some(path.clone());
+        self.available_themes.invalidate();
         self.settings.active_theme_path = Some(path.to_string_lossy().into_owned());
         self.settings.custom_theme_enabled = true;
         self.dirty = false;
@@ -365,6 +394,7 @@ impl StudioApp {
         }
         match theme_package::import_path(source) {
             Ok(imported) => {
+                self.available_themes.invalidate();
                 if let Some((menu, path)) = imported.context_menu {
                     self.context_menu = menu;
                     self.context_menu_path = Some(path);
@@ -759,6 +789,7 @@ impl StudioApp {
         if theme_engine::delete_theme(&deletion.path).is_err() {
             return;
         }
+        self.available_themes.invalidate();
 
         self.theme = fallback_theme;
         self.theme_path = Some(fallback_path.clone());
@@ -853,8 +884,13 @@ impl StudioApp {
         }
         let now = Instant::now();
         self.last_cache_read = now;
+        if let Some(owner) = crate::dashboard::resolve_monitor_owner(self.owner) {
+            self.owner = owner;
+        }
         self.update_status = crate::dashboard::read_update_status(self.owner);
-        self.sync_poll_interval(app_settings::load_settings().poll_interval_ms);
+        let persisted = app_settings::load_settings();
+        self.sync_poll_interval(persisted.poll_interval_ms);
+        self.sync_taskbar_lock(persisted.lock_taskbar);
         let usage_changed =
             app_settings::load_usage_cache().is_some_and(|cache| self.update_usage_cache(cache));
         let countdown_due = self
@@ -920,10 +956,10 @@ impl StudioApp {
         let response = ui
             .scope(|ui| {
                 ui.add_enabled_ui(!self.update_status.is_busy(), |ui| {
-                    let icon_id = ui.id().with("version-update-icon");
+                    let icon_id = egui::IdSalt::new("version-update-icon");
                     let version = version_label();
                     let background = ui.painter().add(egui::Shape::Noop);
-                    let button = egui::AtomLayout::new((
+                    let button = egui::WidgetAtom::new((
                         egui::RichText::new(&version).size(16.0).color(muted()),
                         egui::Atom::custom(icon_id, egui::vec2(12.0, 12.0)),
                     ))
@@ -951,11 +987,7 @@ impl StudioApp {
                         );
                     }
                     button.response.widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::Button,
-                            ui.is_enabled(),
-                            &version,
-                        )
+                        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &version)
                     });
                     if let Some(rect) = button.rect(icon_id) {
                         crate::ui::components::icon::paint_centered_icon(

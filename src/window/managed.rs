@@ -74,7 +74,7 @@ pub(super) unsafe fn create_primary_surface() -> HWND {
 unsafe extern "system" fn primary_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     match msg {
         WM_DESTROY => {
-            crate::desktop_compositor::remove(hwnd);
+            lifecycle::surface_destroyed(hwnd);
             LRESULT(0)
         }
         WM_CLOSE => {
@@ -88,10 +88,10 @@ unsafe extern "system" fn primary_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARA
             }
             LRESULT(0)
         }
-        WM_NCHITTEST | WM_PAINT | WM_ERASEBKGND | WM_SETCURSOR | WM_LBUTTONDOWN | WM_MOUSEMOVE
-        | WM_MOUSELEAVE | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_RBUTTONUP | WM_CAPTURECHANGED => {
-            wnd_proc(hwnd, msg, w, l)
-        }
+        WM_MOUSEACTIVATE | WM_MOUSEWHEEL | WM_MOUSEHWHEEL | WM_APPCOMMAND | WM_CONTEXTMENU
+        | WM_MOUSEHOVER | WM_NCHITTEST | WM_PAINT | WM_ERASEBKGND | WM_SETCURSOR
+        | WM_LBUTTONDOWN | WM_MOUSEMOVE | WM_MOUSELEAVE | WM_LBUTTONUP | WM_LBUTTONDBLCLK
+        | WM_RBUTTONUP | WM_CAPTURECHANGED => wnd_proc(hwnd, msg, w, l),
         WM_DISPLAYCHANGE | WM_DPICHANGED_MSG | WM_SETTINGCHANGE => {
             let owner = lock_state().as_ref().map(|s| s.hwnd.to_hwnd());
             if let Some(owner) = owner {
@@ -340,7 +340,7 @@ pub(super) fn render(theme: &ThemeDocument, data: Option<&AppUsageData>, runtime
         (
             s.managed_windows.clone(),
             s.managed_visible,
-            s.taskbar_auto_eject,
+            s.taskbar_auto_eject && !s.lock_taskbar,
         )
     };
     for copy in copies {
@@ -544,6 +544,7 @@ pub(super) unsafe fn window_message(
         .cloned()?;
     match msg {
         WM_LBUTTONDOWN => {
+            widget_tooltip::hide();
             let mut cursor = POINT::default();
             let _ = GetCursorPos(&mut cursor);
             let rect = native_interop::get_window_rect_safe(hwnd).unwrap_or_default();
@@ -839,6 +840,7 @@ pub(super) fn menu_command(hwnd: HWND, id: usize, ids: &[String]) -> bool {
                     s.managed_placement = Some(PlacementOverride {
                         nest: "floating".into(),
                         monitor_index: 0,
+                        monitor_device: None,
                         screen_x: first_rect.left,
                         screen_y: first_rect.top.saturating_sub(80),
                         tray_offset: 0,

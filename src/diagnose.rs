@@ -52,6 +52,19 @@ impl DiagnoseState {
             }
         }
     }
+
+    fn try_write(&self, line: &[u8]) {
+        if !self.enabled.load(Ordering::Acquire) {
+            return;
+        }
+        // Recovery must still proceed if the frozen thread owns the log mutex.
+        if let Ok(mut guard) = self.file.try_lock() {
+            if let Some(file) = guard.as_mut() {
+                let _ = file.write_all(line);
+                let _ = file.flush();
+            }
+        }
+    }
 }
 
 static DIAGNOSE_STATE: DiagnoseState = DiagnoseState::new();
@@ -160,17 +173,23 @@ pub fn log(message: impl AsRef<str>) {
         return;
     }
 
+    DIAGNOSE_STATE.write(format_line(message.as_ref()).as_bytes());
+}
+
+/// Best-effort recovery logging: skip a busy logger instead of waiting on it.
+pub fn log_recovery(message: impl AsRef<str>) {
+    if is_enabled() {
+        DIAGNOSE_STATE.try_write(format_line(message.as_ref()).as_bytes());
+    }
+}
+
+fn format_line(message: &str) -> String {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
 
-    let line = format!(
-        "[{timestamp}] [pid {}] {}\n",
-        std::process::id(),
-        message.as_ref()
-    );
-    DIAGNOSE_STATE.write(line.as_bytes());
+    format!("[{timestamp}] [pid {}] {}\n", std::process::id(), message)
 }
 
 pub fn log_error(context: &str, error: impl std::fmt::Display) {
@@ -186,6 +205,32 @@ pub fn log_lazy(message: impl FnOnce() -> String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_logging_returns_while_the_log_mutex_is_held() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("recovery.log");
+        let state = std::sync::Arc::new(DiagnoseState::new());
+        state.enable(&path, false).unwrap();
+        let guard = state.file.lock().unwrap();
+        let worker_state = state.clone();
+        let (completed, completion) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            worker_state.try_write(b"busy logger\n");
+            completed.send(()).unwrap();
+        });
+        let result = completion.recv_timeout(std::time::Duration::from_secs(2));
+        drop(guard);
+        worker.join().unwrap();
+        result.expect("recovery must not wait for the logger");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+        state.try_write(b"logger available\n");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "logger available\n"
+        );
+        state.disable();
+    }
 
     #[test]
     fn disabled_logging_skips_formatting() {

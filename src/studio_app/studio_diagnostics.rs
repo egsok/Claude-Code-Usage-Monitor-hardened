@@ -2,7 +2,6 @@ use super::*;
 use crate::ui::components::layout::{setting_row_with_control_width, settings_group};
 use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
 use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTimeEx};
-use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, IsWindow};
 
 const LOG_TAIL_BYTES: u64 = 128 * 1024;
 
@@ -97,25 +96,13 @@ fn set_recording(owner: isize, enabled: bool) -> Result<(), String> {
     send_owner_message(owner, message)
 }
 
-fn monitor_available(owner: isize) -> bool {
-    if owner == 0 {
-        return false;
-    }
-    let hwnd = HWND(owner as *mut _);
-    let mut class_name = [0u16; 64];
-    unsafe {
-        if !IsWindow(Some(hwnd)).as_bool() {
-            return false;
-        }
-        let length = GetClassNameW(hwnd, &mut class_name).max(0) as usize;
-        String::from_utf16_lossy(&class_name[..length]) == "ClaudeCodeUsageMonitorHardenedUpstream2"
-    }
-}
-
 pub(super) fn send_owner_message(owner: isize, message: u32) -> Result<(), String> {
-    if !monitor_available(owner) {
-        return Err("Dashboard is not connected to a running monitor. Open Settings from the monitor's tray menu.".into());
-    }
+    // Resolve at send time as well as during periodic refresh: a click can
+    // arrive before the dashboard has observed the replacement monitor.
+    let owner = crate::dashboard::resolve_monitor_owner(owner).ok_or_else(|| {
+        "Dashboard is not connected to a running monitor. Open Settings from the monitor's tray menu."
+            .to_string()
+    })?;
     unsafe {
         PostMessageW(Some(HWND(owner as *mut _)), message, WPARAM(0), LPARAM(0))
             .map_err(|error| format!("Unable to send request to monitor: {error}"))

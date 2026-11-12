@@ -9,6 +9,7 @@ mod diagnose;
 mod font_catalog;
 #[cfg(test)]
 mod https_test;
+mod known_folders;
 mod localization;
 mod models;
 mod monitors;
@@ -23,6 +24,7 @@ mod theme_package;
 mod tray_icon;
 mod ui;
 mod updater;
+mod widget_font;
 mod window;
 mod winsqlite;
 
