@@ -18,11 +18,14 @@ allowed to execute and update on the user's machine.
 - **Experimental v2:** [2.15.14-hardened.5](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.5)
   — Claude usage-only polling, bounded automatic refresh, native Studio and multiple taskbar copies.
   [v2 README and installation](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/blob/agent/upstream-v2-hardened-experiment/README.md).
+- **Upstream integration candidate:** `2.23.6-hardened.1` in
+  [a separate branch](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/tree/agent/upstream-v2.23-hardened-integration).
+  Not installed or published as a release; [validation and remaining checks](UPSTREAM-INTEGRATION-2026-11-12.md).
 - **Stable published release:** [v1.6.4](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v1.6.4).
   This `main` branch contains v1.7.0 source; it has not been merged with v2.
 
-**Важно:** отсутствие генерационных проб Claude гарантируется кодом v2
-`2.15.14-hardened.4`. В v1 остаётся резервный запрос Messages API. V2 публикуется
+**Важно:** в опубликованной v2 `2.15.14-hardened.5` генерационные пробы Claude
+удалены и проверены локальными тестами. В v1 остаётся резервный запрос Messages API. V2 публикуется
 как prerelease с отдельным профилем; она не заменяет стабильный канал автоматически.
 The v1 documentation below describes v1, including its Messages API fallback.
 
