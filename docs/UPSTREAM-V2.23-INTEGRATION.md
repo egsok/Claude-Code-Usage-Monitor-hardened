@@ -32,9 +32,14 @@ multiple-monitor, WARP fallback or long-running acceptance.
 
 No provider credentials were copied or changed. No Explorer restart, monitor
 disconnect, network reconfiguration or real-provider stress tests were performed.
-Release build is pending the dependency security gate: local cargo-audit and
-cargo-deny are unavailable; CI must check this integration's lockfile before a
-release build. The successful .5 security run does not validate this new graph.
+Security CI 43154109039 passed cargo-audit and cargo-deny for commit 58eb9c7.
+The subsequent offline/locked release build passed (Rust 1.95.0).
+EXE: 7,641,088 bytes, version 2.23.6-hardened.1; SHA-256:
+`188F7638C5D0DDD99E650C0862CD6F2AE5717414C2108130DC19E1DEBE2D73C1`.
+The preserved candidate copy matches the build. Release Studio also displayed
+the compact theme and Settings page, switched between them, and closed normally
+with a separate synthetic profile and no provider polling. Only the installed
+hardened.5 monitor remained afterwards. The candidate is not installed or released.
 
 Merge commit d5fc7a4 was pushed to the separate integration branch. Security run
 43153338871 passed cargo-audit; cargo-deny rejected the unused dirs dependency's
