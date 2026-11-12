@@ -2,7 +2,8 @@
 
 This branch integrates upstream v2.23.6 with the hardened fork's passive
 polling, atomic settings and independent monitor copies. Candidate version:
-`2.23.6-hardened.1`. It is not installed or released; validation is in progress.
+`2.23.6-hardened.1`. Installed locally for daily evaluation after explicit approval;
+not published as a release. Full taskbar/multi-monitor/soak acceptance remains pending.
 
 **Published experimental build:** [2.15.14-hardened.5](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.15.14-hardened.5).
 **Integration:** [decisions and validation](docs/UPSTREAM-V2.23-INTEGRATION.md).

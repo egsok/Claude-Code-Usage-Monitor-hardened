@@ -3,7 +3,16 @@
 Authorized on 2026-11-12 after publishing and installing hardened.5.
 Base/rollback: f1077b2, local tag before-upstream-v2.23.6-20261112.
 Target: a2b2b31 (upstream v2.23.6). Candidate: 2.23.6-hardened.1.
-Separate worktree/branch; installed .5 is not replaced by this integration.
+Separate worktree/branch. After explicit approval, this candidate replaced the
+local .5 installation on 2026-11-12 at 07:42 Moscow time, at the same EXE path.
+The old EXE and full monitor profile were backed up and hash-verified. Existing
+settings and startup entry remained unchanged (300000 ms; auto-eject false).
+Claude/Codex cache timestamps advanced with poll_ok=true and no stale flags.
+Installed Studio displayed the current compact theme with usage and closed;
+only one monitor process remained. No network/auth settings were changed.
+The user observed top clipping on side monitors during Computer Use, but not on
+the center monitor, and recalls similar behavior on .5. The cause and whether it
+persists outside Computer Use remain unverified; no placement changes were made.
 
 ## Merge policy
 
@@ -39,7 +48,8 @@ EXE: 7,641,088 bytes, version 2.23.6-hardened.1; SHA-256:
 The preserved candidate copy matches the build. Release Studio also displayed
 the compact theme and Settings page, switched between them, and closed normally
 with a separate synthetic profile and no provider polling. Only the installed
-hardened.5 monitor remained afterwards. The candidate is not installed or released.
+hardened.5 monitor remained after that pre-installation check. The later local
+installation is recorded above; no public candidate release has been published.
 
 Merge commit d5fc7a4 was pushed to the separate integration branch. Security run
 43153338871 passed cargo-audit; cargo-deny rejected the unused dirs dependency's
