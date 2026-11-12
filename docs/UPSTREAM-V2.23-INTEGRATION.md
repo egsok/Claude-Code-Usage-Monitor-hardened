@@ -36,6 +36,15 @@ Release build is pending the dependency security gate: local cargo-audit and
 cargo-deny are unavailable; CI must check this integration's lockfile before a
 release build. The successful .5 security run does not validate this new graph.
 
+Merge commit d5fc7a4 was pushed to the separate integration branch. Security run
+43153338871 passed cargo-audit; cargo-deny rejected the unused dirs dependency's
+option-ext license. The code already uses upstream Windows known-folder APIs.
+Removing dirs also pruned dirs-sys, option-ext and redox_users; every remaining
+locked version and checksum is unchanged. No license exception was added.
+The superseded Test-TaskbarTray.ps1 deletion is also retained from upstream;
+the new VM harness has not been run and its updater scenarios are not hardened
+acceptance scenarios.
+
 Independent static review found and verified fixes for update-check completion
 targeting a transient surface instead of the controller, and managed copies
 ignoring lock_taskbar during automatic ejection. A local injected-result native
