@@ -4,6 +4,17 @@ Notable changes to Claude Code Usage Monitor are documented here, newest first.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), with
 changes grouped into Added, Changed, Fixed, and Removed where applicable.
 
+## [2.23.6-hardened.2] - 2026-11-12
+
+- Include **Hardened Compact · 3 rows** in the EXE, selectable in Theme Studio
+  without downloading/importing JSON. Claude's Fable row appears when available.
+- Preserve the active theme and edits to an existing imported copy. Each bundled
+  editable theme has its own installation marker, so older profiles receive the
+  new theme without restoring a previously deleted Minecraft theme.
+- Add regression coverage for fresh-profile selection, upgrade installation,
+  imported edits, deletion after installation and three-row geometry.
+- Polling, credentials, network routing and executable update behavior are unchanged.
+
 ## [2.23.6-hardened.1] - 2026-11-12
 
 Experimental release integrating upstream v2.23.6; installed for daily evaluation.

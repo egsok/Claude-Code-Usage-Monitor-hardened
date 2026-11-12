@@ -29,6 +29,19 @@ the folder containing the executable.
 
 ## Duplicate and customise a built-in theme
 
+### Enable the compact three-row layout
+
+Open **Theme Studio** and select **Hardened Compact · 3 rows** from the **Theme**
+dropdown. It is included from version 2.23.6-hardened.2, so no import is required.
+Selection applies the theme immediately. Claude's five-hour, weekly and Fable
+limits share one compact column; the Fable row appears only when available.
+Your previous theme remains in the dropdown, and installing an update does not
+change your selection. This bundled theme is editable without duplication.
+If you delete it after installation, restarting does not add it back; you can
+reimport the [JSON](src/themes/hardened-claude-three-rows.json) if needed.
+
+### Edit a built-in theme
+
 Built-in themes are read-only. Create an editable copy to make your own design;
 the original stays available to switch back to.
 

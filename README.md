@@ -1,14 +1,14 @@
-# Claude Code Usage Monitor — Hardened v2 Experiment
+# Claude Code Usage Monitor — Hardened v2
 
 This branch integrates upstream v2.23.6 with the hardened fork's passive
-polling, atomic settings and independent monitor copies. Prerelease version:
-`2.23.6-hardened.1`, installed locally for daily evaluation.
-Full taskbar/multi-monitor/soak acceptance remains pending; see the release notes.
+polling, atomic settings and independent monitor copies. Version:
+`2.23.6-hardened.2`, with the editable compact three-row theme included.
+See the release notes for installation and known limitations.
 
-**Experimental release:** [2.23.6-hardened.1](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.23.6-hardened.1).
-**Release notes and known limitations:** [details](.github/release-notes/v2.23.6-hardened.1.md).
+**Release:** [2.23.6-hardened.2](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v2.23.6-hardened.2).
+**Release notes and known limitations:** [details](.github/release-notes/v2.23.6-hardened.2.md).
 **Integration:** [decisions and validation](docs/UPSTREAM-V2.23-INTEGRATION.md).
-This candidate keeps the separate v2 profile/startup identity. It does not launch
+V2 keeps its separate profile/startup identity. It does not launch
 provider agents, refresh credentials, or download/replace its executable.
 
 Claude statistics use only `GET /api/oauth/usage`: no Messages API probes,
@@ -47,7 +47,7 @@ Claude Code credentials can be detected from the CLI, Claude desktop app, or WSL
 
 ## Installation
 
-Download the EXE and checksum from the prerelease linked above.
+Download the EXE and checksum from the release linked above.
 Compare `Get-FileHash .\claude-code-usage-monitor.exe -Algorithm SHA256` with the checksum file.
 
 For a new v2 installation, use a stable location such as:
@@ -64,9 +64,10 @@ profile or provider credentials. The application does not change network routing
 V2 uses `%APPDATA%\ClaudeCodeUsageMonitorHardenedUpstream2`, separate from v1.
 It does not automatically import a v1 profile. If running v1, explicitly choose
 which version should start with Windows; do not enable both accidentally.
-The compact three-row theme is available at
-[src/themes/hardened-claude-three-rows.json](src/themes/hardened-claude-three-rows.json)
-for manual import into Studio; a fresh profile does not include the author's settings.
+To enable the included compact three-row theme, open **Open Dashboard → Theme Studio**
+and select **Hardened Compact · 3 rows** in the **Theme** dropdown. It applies immediately;
+no download or import is needed. Updates preserve your current selection and existing
+edits to a previously imported copy. Fable appears only when your account reports it.
 
 There is no WinGet release for v2. See [update policy](docs/updater.md).
 

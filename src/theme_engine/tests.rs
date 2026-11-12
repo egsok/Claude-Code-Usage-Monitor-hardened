@@ -2542,9 +2542,63 @@ fn compact_fluent_quad_widget_respects_usage_direction() {
 }
 
 #[test]
+fn bundled_hardened_compact_keeps_three_claude_rows_in_taskbar_height() {
+    let (_, source, _) = BUNDLED_EDITABLE_THEME_SOURCES
+        .iter()
+        .find(|(id, _, _)| *id == HARDENED_COMPACT_THEME_ID)
+        .unwrap();
+    let mut theme: ThemeDocument = serde_json::from_str(source).unwrap();
+    theme.prepare_runtime();
+    assert!(theme.validate().is_empty());
+    assert!(!theme.is_builtin());
+    let mut context = DataContext::default();
+    context.insert("providers.claude.enabled", 1.0);
+    context.insert("claude.model.fable.available", 1.0);
+    let surface = &theme.surfaces[0];
+    let height = evaluate(&surface.height.0, &context).unwrap();
+    assert_eq!(height, 46.0);
+    let mut previous_bottom = 0.0;
+    for id in [
+        "claude-session-value-dark",
+        "claude-weekly-value-dark",
+        "claude-fable-value-dark",
+    ] {
+        let row = surface.children.iter().find(|row| row.id == id).unwrap();
+        let top = evaluate(&row.y.0, &context).unwrap();
+        let bottom = top + evaluate(&row.height.0, &context).unwrap();
+        assert!(top >= previous_bottom, "{id} overlaps the preceding row");
+        assert!(bottom <= height, "{id} falls outside the taskbar widget");
+        previous_bottom = bottom;
+    }
+}
+
+#[test]
+fn bundled_hardened_compact_upgrades_old_library_without_overwriting_or_resurrecting() {
+    let root = tempfile::tempdir().unwrap();
+    let themes = root.path().join("themes");
+    let assets = themes.join("assets");
+    std::fs::create_dir_all(&themes).unwrap();
+    // A .1 profile already installed Minecraft; its marker must not hide the new theme.
+    std::fs::write(themes.join(".minecraft-theme-installed"), b"1").unwrap();
+    ensure_bundled_editable_themes(&themes, &assets).unwrap();
+    let path = themes.join(format!("{HARDENED_COMPACT_THEME_ID}.json"));
+    let mut theme = load_theme(&path).unwrap();
+    assert_eq!(theme.name, "Hardened Compact · 3 rows");
+    theme.name = "My compact layout".into();
+    crate::app_settings::write_json_atomic(&path, &theme).unwrap();
+    // Also cover an existing manual import before this version installed its marker.
+    std::fs::remove_file(themes.join(".hardened-compact-theme-installed")).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    ensure_bundled_editable_themes(&themes, &assets).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    std::fs::remove_file(&path).unwrap();
+    ensure_bundled_editable_themes(&themes, &assets).unwrap();
+    assert!(!path.exists(), "a deleted editable theme must stay deleted");
+}
+
+#[test]
 fn bundled_minecraft_theme_is_valid_editable_and_uses_dashboard_v2() {
-    assert_eq!(BUNDLED_EDITABLE_THEME_SOURCES.len(), 1);
-    let (expected_id, source) = BUNDLED_EDITABLE_THEME_SOURCES[0];
+    let (expected_id, source, _) = BUNDLED_EDITABLE_THEME_SOURCES[0];
     let mut theme: ThemeDocument = serde_json::from_str(source).unwrap();
     assert_eq!(expected_id, MINECRAFT_THEME_ID);
     assert_eq!(theme.id, MINECRAFT_THEME_ID);

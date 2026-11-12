@@ -714,6 +714,45 @@ mod monitor_reconnection {
 }
 
 #[test]
+fn bundled_compact_is_selectable_on_fresh_profile_and_preserves_existing_choice() {
+    let context = egui::Context::default();
+    let mut app = StudioApp::new_with_context(&context, 0, Page::Studio);
+    let compact = app
+        .available_themes()
+        .iter()
+        .find(|theme| theme.name == "Hardened Compact · 3 rows")
+        .expect("compact theme should be selectable without import")
+        .path
+        .clone();
+    assert_eq!(app.theme.id, theme_engine::CLASSIC_THEME_ID);
+    app.activate_theme(compact.clone());
+    assert_eq!(app.theme.id, theme_engine::HARDENED_COMPACT_THEME_ID);
+    assert_eq!(
+        app_settings::load_settings().active_theme_path.as_deref(),
+        compact.to_str()
+    );
+
+    // Updating the library on the next launch must not change an existing choice/settings.
+    let mut settings = app_settings::load_settings();
+    settings.active_theme_path = Some(
+        theme_engine::ensure_starter_theme()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+    );
+    settings.poll_interval_ms = 900_000;
+    settings.taskbar_auto_eject = false;
+    app_settings::write_json_atomic(&app_settings::settings_path(), &settings).unwrap();
+    let before = std::fs::read(app_settings::settings_path()).unwrap();
+    let reopened = StudioApp::new_with_context(&context, 0, Page::Studio);
+    assert_eq!(reopened.theme.id, theme_engine::CLASSIC_THEME_ID);
+    assert_eq!(
+        std::fs::read(app_settings::settings_path()).unwrap(),
+        before
+    );
+}
+
+#[test]
 fn available_themes_keeps_current_external_theme_fresh_without_stale_fallbacks() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = app_with_surfaces(vec![root("root")]);

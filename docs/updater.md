@@ -2,8 +2,8 @@
 
 The portable application never downloads, replaces or executes an update EXE.
 Its release check is informational and reads this fork's latest stable GitHub
-release. Prereleases are not offered by that check: download v2 explicitly from
-[GitHub Releases](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases).
+release. V2 is now the Latest release; checks can offer it, but installation
+remains manual. Any future prereleases are not offered by that check.
 
 ## Manual update
 

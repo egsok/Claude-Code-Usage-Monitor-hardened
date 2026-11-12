@@ -23,6 +23,7 @@ pub const CLASSIC_THEME_ID: &str = "classic-usage-widget";
 pub const COMPACT_FLUENT_QUAD_THEME_ID: &str = "compact-fluent-quad";
 pub const CLASSIC_VERTICAL_THEME_ID: &str = "classic-vertical";
 pub const MINECRAFT_THEME_ID: &str = "theme-minecraft";
+pub const HARDENED_COMPACT_THEME_ID: &str = "hardened-claude-three-rows";
 
 const BUILTIN_THEME_SOURCES: &[(&str, &str)] = &[
     (
@@ -42,11 +43,18 @@ const BUILTIN_THEME_SOURCES: &[(&str, &str)] = &[
 /// Bundled starting points are copied into the managed library only when they
 /// are missing. Their ids are deliberately excluded from `is_builtin_theme_id`
 /// so users can edit, rename, export, or delete them in Theme Studio.
-const BUNDLED_EDITABLE_THEME_SOURCES: &[(&str, &str)] = &[(
-    MINECRAFT_THEME_ID,
-    include_str!(concat!(env!("OUT_DIR"), "/minecraft-codex.json")),
-)];
-const BUNDLED_EDITABLE_INSTALL_MARKER: &str = ".minecraft-theme-installed";
+const BUNDLED_EDITABLE_THEME_SOURCES: &[(&str, &str, &str)] = &[
+    (
+        MINECRAFT_THEME_ID,
+        include_str!(concat!(env!("OUT_DIR"), "/minecraft-codex.json")),
+        ".minecraft-theme-installed",
+    ),
+    (
+        HARDENED_COMPACT_THEME_ID,
+        include_str!(concat!(env!("OUT_DIR"), "/hardened-claude-three-rows.json")),
+        ".hardened-compact-theme-installed",
+    ),
+];
 
 const BUNDLED_THEME_ASSETS: &[(&str, &[u8])] = &[
     (
