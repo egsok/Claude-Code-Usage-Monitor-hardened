@@ -20,7 +20,8 @@ allowed to execute and update on the user's machine.
   [v2 README and installation](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/blob/agent/upstream-v2-hardened-experiment/README.md).
 - **Upstream integration candidate:** `2.23.6-hardened.1` in
   [a separate branch](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/tree/agent/upstream-v2.23-hardened-integration).
-  Not installed or published as a release; [validation and remaining checks](UPSTREAM-INTEGRATION-2026-11-12.md).
+  Installed locally for daily evaluation, not published as a release;
+  [validation and remaining checks](UPSTREAM-INTEGRATION-2026-11-12.md).
 - **Stable published release:** [v1.6.4](https://github.com/egsok/Claude-Code-Usage-Monitor-hardened/releases/tag/v1.6.4).
   This `main` branch contains v1.7.0 source; it has not been merged with v2.
 
